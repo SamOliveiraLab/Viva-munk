@@ -11,10 +11,14 @@ import uuid
 
 from bigraph_viz import plot_bigraph
 from process_bigraph import Composite, gather_emitter_results
-from process_bigraph.emitter import (
-    save_simulation_metadata,
-    mark_simulation_finished,
-)
+try:
+    from process_bigraph.emitter import (
+        save_simulation_metadata,
+        mark_simulation_finished,
+    )
+    _HAS_SQLITE_EMITTER = True
+except ImportError:
+    _HAS_SQLITE_EMITTER = False
 
 from multi_cell import core_import
 from multi_cell.experiments.registry import EXPERIMENT_REGISTRY
@@ -218,7 +222,7 @@ def run_experiment(name, output_dir='out', entry=None):
     # wire mapping (agents/particles/time) is preserved — we only rewrite the
     # address and config.
     simulation_id = str(uuid.uuid4())
-    if 'emitter' in document:
+    if _HAS_SQLITE_EMITTER and 'emitter' in document:
         wires = document['emitter'].get('inputs', {})
         emitter_config = {
             'emit': {port: 'node' for port in wires},
@@ -226,16 +230,8 @@ def run_experiment(name, output_dir='out', entry=None):
             'db_file': DB_FILE,
             'simulation_id': simulation_id,
             'name': name,
-            # Batch 100 INSERTs per transaction so the per-row fsync cost
-            # is amortized. Safe for all experiments — the emitter flushes
-            # on close() and query(), so nothing is lost at shutdown.
             'batch_size': int(entry.get('emitter_batch_size', 100)),
         }
-        # Optional: thin out high-frequency emitters (e.g. chemotaxis runs
-        # the composite every 0.1s; writing every tick floods the db with
-        # ~36k rows). `entry['emitter_subsample']=N` keeps 1 of every N
-        # ticks; the stored `step` column retains the real composite tick
-        # number so time-series analysis stays correct.
         subsample = entry.get('emitter_subsample')
         if subsample:
             emitter_config['subsample'] = int(subsample)
@@ -262,18 +258,20 @@ def run_experiment(name, output_dir='out', entry=None):
         'description':     entry.get('description', ''),
         'reproducibility': _reproducibility_info(),
     }
-    save_simulation_metadata(
-        db_path, simulation_id,
-        composite_config=serialized, metadata=run_metadata, name=name,
-    )
-    print(f'  simulation_id: {simulation_id}')
-    print(f'  db: {db_path}')
+    if _HAS_SQLITE_EMITTER:
+        save_simulation_metadata(
+            db_path, simulation_id,
+            composite_config=serialized, metadata=run_metadata, name=name,
+        )
+        print(f'  simulation_id: {simulation_id}')
+        print(f'  db: {db_path}')
 
     t0 = time.time()
     sim.run(total_time)
     elapsed = time.time() - t0
     results = gather_emitter_results(sim)[('emitter',)]
-    mark_simulation_finished(db_path, simulation_id, elapsed_seconds=elapsed)
+    if _HAS_SQLITE_EMITTER:
+        mark_simulation_finished(db_path, simulation_id, elapsed_seconds=elapsed)
     print(f'Completed in {elapsed:.1f}s — {len(results)} steps')
 
     last = results[-1]

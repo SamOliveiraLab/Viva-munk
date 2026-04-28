@@ -1,0 +1,242 @@
+"""
+partaker_to_vivamunk.py
+-----------------------
+Initializes a Viva-munk Daughter Machine with real Partaker cell data.
+
+Place this file in the Viva-munk repo root, then run:
+
+    python partaker_to_vivamunk.py path/to/cell_history_p0.csv
+
+Optional flags:
+    --pixel_size      um/pixel  (default 0.0645 for 100x Nikon confocal)
+    --frame_interval  seconds between frames (default 300 = 5 min)
+    --sim_time        simulation seconds (default 28800 = 8 h)
+"""
+
+import argparse
+import csv
+import math
+import os
+
+from process_bigraph.emitter import emitter_from_wires
+from multi_cell.processes.grow_divide import add_grow_divide_to_agents
+from multi_cell.processes.remove_crossing import make_remove_crossing_process
+from multi_cell.experiments.runner import run_experiment
+
+
+# ── helpers ──────────────────────────────────────────────────────────
+
+def parse_array(s):
+    if not s or s.strip() == '':
+        return []
+    return [float(x.strip()) for x in s.split(',')]
+
+
+def capsule_mass(length, radius, density=0.02):
+    cyl_area = length * 2.0 * radius
+    cap_area = math.pi * radius ** 2
+    return density * (cyl_area + cap_area)
+
+
+# ── load ─────────────────────────────────────────────────────────────
+
+def load_partaker_cells(csv_path, pixel_size):
+    cells = []
+    with open(csv_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if int(row['start_time']) != 0:
+                continue
+
+            lengths = parse_array(row['lengths'])
+            widths  = parse_array(row['widths'])
+            orientations = parse_array(row['orientations'])
+            x_pos = parse_array(row['x_positions'])
+            y_pos = parse_array(row['y_positions'])
+            morphs = row['morphology_classes'].split(',')
+
+            if not lengths or not x_pos:
+                continue
+            if morphs[0].strip() == 'Artifact':
+                continue
+
+            length_um = lengths[0] * pixel_size
+            width_um  = widths[0] * pixel_size
+
+            # keep only biologically plausible single E. coli cells
+            if length_um < 0.5 or length_um > 15.0:
+                continue
+            if width_um < 0.3 or width_um > 3.0:
+                continue
+
+            cells.append({
+                'cell_id':  row['cell_id'],
+                'x':        x_pos[0] * pixel_size,
+                'y':        y_pos[0] * pixel_size,
+                'length':   length_um,
+                'width':    width_um,
+                'angle':    orientations[0],
+                'lifespan': int(row['lifespan']),
+                'fate':     row['fate'],
+            })
+    return cells
+
+
+def estimate_growth_rate(cells, frame_interval):
+    dts = [c['lifespan'] * frame_interval
+           for c in cells if c['fate'] == 'divided' and c['lifespan'] > 0]
+    if dts:
+        avg = sum(dts) / len(dts)
+        rate = math.log(2) / avg
+    else:
+        avg = 2400.0
+        rate = math.log(2) / avg
+    return rate, avg, len(dts)
+
+
+def build_agents(cells, env_size):
+    density = 0.02
+    agents = {}
+    for c in cells:
+        aid = f"p{c['cell_id']}"
+        radius = max(c['width'] / 2.0, 0.3)
+        length = max(c['length'], radius * 2.0)
+        mass = capsule_mass(length, radius, density)
+
+        pad = radius + 1.0
+        x = max(pad, min(c['x'], env_size - pad))
+        y = max(pad, min(c['y'], env_size - pad))
+
+        agents[aid] = {
+            'id':         aid,
+            'type':       'segment',
+            'mass':       float(mass),
+            'length':     float(length),
+            'radius':     float(radius),
+            'angle':      float(c['angle']),
+            'location':   (float(x), float(y)),
+            'velocity':   (0.0, 0.0),
+            'elasticity': 0.1,
+            'adhesins':   1.0,
+        }
+    return agents
+
+
+# ── document builder ─────────────────────────────────────────────────
+
+def make_document(csv_path, pixel_size, frame_interval):
+    """Returns (document_fn, env_size, growth_rate, n_cells)."""
+
+    cells = load_partaker_cells(csv_path, pixel_size)
+    print(f"Loaded {len(cells)} valid cells from frame 0")
+
+    all_x = [c['x'] for c in cells]
+    all_y = [c['y'] for c in cells]
+    env_size = max(max(all_x), max(all_y)) + 10.0
+    env_size = max(env_size, 30.0)
+    print(f"Environment size: {env_size:.1f} um")
+
+    rate, avg_dt, n_div = estimate_growth_rate(cells, frame_interval)
+    print(f"Growth rate: {rate:.6f} /s  (doubling {avg_dt:.0f}s = {avg_dt/60:.1f} min, n={n_div})")
+
+    agents = build_agents(cells, env_size)
+    print(f"Created {len(agents)} agents")
+
+    sample = list(agents.values())[0]
+    division_threshold = 0.02 * (2 * sample['radius']) * (sample['length'] * 2.0)
+
+    initial_state = {'cells': agents, 'particles': {}}
+    add_grow_divide_to_agents(
+        initial_state,
+        agents_key='cells',
+        config={
+            'agents_key': 'cells',
+            'rate': rate,
+            'threshold': division_threshold,
+            'mutate': True,
+        },
+    )
+
+    interval = 30.0
+    flow_x = env_size * 0.95
+    n_cells = len(agents)
+
+    def document_fn(config=None):
+        return {
+            'cells':     initial_state['cells'],
+            'particles': initial_state['particles'],
+            'multibody': {
+                '_type': 'process',
+                'address': 'local:PymunkProcess',
+                'config': {
+                    'env_size': env_size,
+                    'elasticity': 0.1,
+                },
+                'interval': interval,
+                'inputs': {
+                    'segment_cells': ['cells'],
+                    'circle_particles': ['particles'],
+                },
+                'outputs': {
+                    'segment_cells': ['cells'],
+                    'circle_particles': ['particles'],
+                },
+            },
+            'remove_crossing': make_remove_crossing_process(
+                x_max=flow_x,
+                agents_key='cells',
+            ),
+            'emitter': emitter_from_wires({
+                'agents': ['cells'],
+                'particles': ['particles'],
+                'time': ['global_time'],
+            }),
+        }
+
+    return document_fn, env_size, rate, n_cells
+
+
+# ── main ─────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Run Viva-munk Daughter Machine with real Partaker data')
+    parser.add_argument('csv', help='Path to cell_history_p0.csv')
+    parser.add_argument('--pixel_size', type=float, default=0.0645,
+                        help='um/pixel (default: 0.0645 for 100x)')
+    parser.add_argument('--frame_interval', type=float, default=300,
+                        help='Seconds between frames (default: 300 = 5 min)')
+    parser.add_argument('--sim_time', type=float, default=28800,
+                        help='Simulation seconds (default: 28800 = 8h)')
+    args = parser.parse_args()
+
+    print(f"\n{'='*50}")
+    print(f"  PARTAKER -> VIVA-MUNK DAUGHTER MACHINE")
+    print(f"  Pixel size:     {args.pixel_size} um/px")
+    print(f"  Frame interval: {args.frame_interval} s")
+    print(f"  Sim time:       {args.sim_time} s ({args.sim_time/3600:.1f} h)")
+    print(f"{'='*50}\n")
+
+    doc_fn, env_size, rate, n_cells = make_document(
+        args.csv, args.pixel_size, args.frame_interval,
+    )
+
+    entry = {
+        'document': doc_fn,
+        'time': args.sim_time,
+        'config': {'env_size': env_size},
+        'description': f'Daughter machine initialized with {n_cells} Partaker cells',
+    }
+
+    result = run_experiment(
+        'partaker_daughter_machine',
+        output_dir='out',
+        entry=entry,
+    )
+
+    print(f"\nDone! Output in out/")
+    print(f"GIF: {result.get('gif_path', 'N/A')}")
+
+
+if __name__ == '__main__':
+    main()

@@ -3,7 +3,10 @@ __pycache__/
 out/
 uv.lock
 .DS_Store
+._*
 .idea/
 *.egg-info/
 venv/
+.venv/
+*.egg-info/
 *.pyc

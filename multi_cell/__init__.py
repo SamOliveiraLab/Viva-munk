@@ -7,7 +7,11 @@ __version__ = "0.0.1"
 from process_bigraph import register_types as pb_register_types
 from process_bigraph.types.process import register_types as pb_types_register
 from process_bigraph.composite import Composite
-from process_bigraph.emitter import RAMEmitter, SQLiteEmitter
+from process_bigraph.emitter import RAMEmitter
+try:
+    from process_bigraph.emitter import SQLiteEmitter
+except ImportError:
+    SQLiteEmitter = None
 from bigraph_schema.core import Core, BASE_TYPES
 from bigraph_viz import register_types as viz_register_types
 
@@ -87,7 +91,8 @@ def register_processes(core):
     core.register_link('FieldDecay', FieldDecay)
     core.register_link('Composite', Composite)
     core.register_link('RAMEmitter', RAMEmitter)
-    core.register_link('SQLiteEmitter', SQLiteEmitter)
+    if SQLiteEmitter is not None:
+        core.register_link('SQLiteEmitter', SQLiteEmitter)
 
 
 def core_import(core=None, config=None):

@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "multi-cell simulations with pymunk 2d physics"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
   {name = "Eran Agmon", email = "agmon.eran@gmail.com"},
   {name = "Ryan Spangler"},
