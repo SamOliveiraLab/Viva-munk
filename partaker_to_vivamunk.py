@@ -63,6 +63,13 @@ def load_partaker_cells(csv_path, pixel_size):
             length_um = lengths[0] * pixel_size
             width_um  = widths[0] * pixel_size
 
+            # Partaker occasionally emits NaN for length/width/angle/position;
+            # range filters below silently let NaN through (nan < x is False),
+            # which becomes a fatal mass=NaN inside Chipmunk.
+            vals = [length_um, width_um, orientations[0], x_pos[0], y_pos[0]]
+            if any(not math.isfinite(v) for v in vals):
+                continue
+
             # keep only biologically plausible single E. coli cells
             if length_um < 0.5 or length_um > 15.0:
                 continue
