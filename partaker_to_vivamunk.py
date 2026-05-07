@@ -11,6 +11,7 @@ Optional flags:
     --pixel_size      um/pixel  (default 0.0645 for 100x Nikon confocal)
     --frame_interval  seconds between frames (default 300 = 5 min)
     --sim_time        simulation seconds (default 28800 = 8 h)
+    --max_cells       cap loaded cells from frame 0 for smoke tests (default: no cap)
 """
 
 import argparse
@@ -131,11 +132,14 @@ def build_agents(cells, env_size):
 
 # ── document builder ─────────────────────────────────────────────────
 
-def make_document(csv_path, pixel_size, frame_interval):
+def make_document(csv_path, pixel_size, frame_interval, max_cells=None):
     """Returns (document_fn, env_size, growth_rate, n_cells)."""
 
     cells = load_partaker_cells(csv_path, pixel_size)
     print(f"Loaded {len(cells)} valid cells from frame 0")
+    if max_cells is not None and len(cells) > max_cells:
+        cells = cells[:max_cells]
+        print(f"Capped to first {len(cells)} cells (--max_cells)")
 
     all_x = [c['x'] for c in cells]
     all_y = [c['y'] for c in cells]
@@ -215,6 +219,8 @@ def main():
                         help='Seconds between frames (default: 300 = 5 min)')
     parser.add_argument('--sim_time', type=float, default=28800,
                         help='Simulation seconds (default: 28800 = 8h)')
+    parser.add_argument('--max_cells', type=int, default=None,
+                        help='Cap number of frame-0 cells loaded (smoke tests)')
     args = parser.parse_args()
 
     print(f"\n{'='*50}")
@@ -222,10 +228,13 @@ def main():
     print(f"  Pixel size:     {args.pixel_size} um/px")
     print(f"  Frame interval: {args.frame_interval} s")
     print(f"  Sim time:       {args.sim_time} s ({args.sim_time/3600:.1f} h)")
+    if args.max_cells is not None:
+        print(f"  Max cells:      {args.max_cells}")
     print(f"{'='*50}\n")
 
     doc_fn, env_size, rate, n_cells = make_document(
         args.csv, args.pixel_size, args.frame_interval,
+        max_cells=args.max_cells,
     )
 
     entry = {
