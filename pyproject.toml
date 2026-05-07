@@ -28,6 +28,7 @@ dependencies = [
     "matplotlib",
     "Pillow",
     "plum-dispatch",
+    "h5py",
 ]
 
 [project.optional-dependencies]

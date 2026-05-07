@@ -1,148 +1,119 @@
 """
 real_movie_renderer.py
 ----------------------
-Render the real Partaker tracking data as a GIF, frame by frame, so it can be
-placed side-by-side with the simulator output.
+Render the real Partaker movie as a binary segmentation-mask GIF (white cells
+on black background), reading directly from the omnipose label cache that
+Partaker writes during tracking.
 
-    python real_movie_renderer.py path/to/enhanced_tracking_data_all_tracks.csv
+    python real_movie_renderer.py path/to/segmentation_cache.h5
+
+The default cache is at:
+    /Volumes/SAM1/server_workspace_backup/Bukola/partaker_dataset_DT/
+        Saved_experiment_w_tracking/segmentation_cache.h5
+
+Inside the cache, the array `mmap_arrays/omnipose_bact_phase/array` has shape
+(T, P, C, H, W) with dtype uint16. Channel 0 is the instance-label mask;
+threshold > 0 to get a binary cell mask.
 
 Optional flags:
-    --pixel_size      um/pixel (default 0.0645 for 100x Nikon confocal)
-    --frame_interval  seconds between frames (default 300 = 5 min)
-    --frame_max       last frame to render, inclusive (default 130)
-    --iptg_frame      frame at which IPTG arrives, marked on output (default 28)
-    --output          path to GIF (default out/real.gif)
-    --fps             frames per second in the GIF (default 10)
+    --position    position index in the multi-position acquisition (default 0)
+    --channel     channel index of the label mask (default 0)
+    --frame_max   last frame to include, inclusive (default 130)
+    --output      path to GIF (default out/real.gif)
+    --fps         frames per second in the GIF (default 10)
 """
 
 import argparse
-import io
-import math
 import os
 
-import matplotlib.pyplot as plt
+import h5py
 import numpy as np
-import pandas as pd
-from matplotlib.patches import Ellipse
 from PIL import Image
 
 
-def load_frames(csv_path, frame_max):
-    df = pd.read_csv(csv_path)
-    df = df[df.time_point <= frame_max]
-    df = df[df.morphology_class != 'Artifact']
-    df = df.dropna(subset=['x_um', 'y_um', 'major_axis_length',
-                           'minor_axis_length', 'orientation_radians'])
-    return df
+DEFAULT_CACHE = (
+    '/Volumes/SAM1/server_workspace_backup/Bukola/partaker_dataset_DT/'
+    'Saved_experiment_w_tracking/segmentation_cache.h5'
+)
+DEFAULT_ROI = (
+    '/Volumes/SAM1/server_workspace_backup/Bukola/partaker_dataset_DT/'
+    'Saved_experiment_w_tracking/roi_mask.npy'
+)
+ARRAY_KEY = 'mmap_arrays/omnipose_bact_phase/array'
 
 
-def figure_extents(df, pad_um=2.0):
-    x_min = float(df.x_um.min()) - pad_um
-    x_max = float(df.x_um.max()) + pad_um
-    y_min = float(df.y_um.min()) - pad_um
-    y_max = float(df.y_um.max()) + pad_um
-    return x_min, x_max, y_min, y_max
+def load_mask_frames(h5_path, position, channel, frame_max, roi_mask=None):
+    with h5py.File(h5_path, 'r') as f:
+        arr = f[ARRAY_KEY]
+        n_frames_avail = arr.shape[0]
+        last = min(frame_max, n_frames_avail - 1)
+        frames = []
+        for t in range(last + 1):
+            labels = arr[t, position, channel]
+            mask = (labels > 0).astype(np.uint8) * 255
+            if roi_mask is not None:
+                mask = np.where(roi_mask > 0, mask, 0).astype(np.uint8)
+            frames.append(mask)
+            if t % 10 == 0:
+                print(f"  loaded frame {t}/{last}")
+        return frames
 
 
-def render_frame(ax, df_t, pixel_size, extents, frame_idx, iptg_frame,
-                 frame_interval):
-    x_min, x_max, y_min, y_max = extents
-    ax.clear()
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_max, y_min)  # invert y so origin is top-left, matching image
-    ax.set_aspect('equal')
-    ax.set_facecolor('#0b0b0b')
-    ax.set_xticks([])
-    ax.set_yticks([])
-
-    iptg_on = frame_idx >= iptg_frame
-    edge = '#7df57d' if iptg_on else '#9ec5ff'
-    face = '#244c24' if iptg_on else '#1f3a66'
-
-    for _, row in df_t.iterrows():
-        major_um = row.major_axis_length * pixel_size
-        minor_um = row.minor_axis_length * pixel_size
-        if not math.isfinite(major_um) or not math.isfinite(minor_um):
-            continue
-        if major_um <= 0 or minor_um <= 0:
-            continue
-        e = Ellipse(
-            xy=(row.x_um, row.y_um),
-            width=major_um,
-            height=minor_um,
-            angle=math.degrees(row.orientation_radians),
-            facecolor=face,
-            edgecolor=edge,
-            linewidth=0.6,
-        )
-        ax.add_patch(e)
-
-    t_seconds = frame_idx * frame_interval
-    label = f"frame {frame_idx:>3} | t = {t_seconds/60:5.1f} min | n = {len(df_t)}"
-    ax.text(0.02, 0.98, label,
-            transform=ax.transAxes, ha='left', va='top',
-            color='white', fontsize=9, family='monospace')
-
-    if iptg_on:
-        ax.text(0.98, 0.98, '+IPTG',
-                transform=ax.transAxes, ha='right', va='top',
-                color='#7df57d', fontsize=10, family='monospace',
-                weight='bold')
-
-
-def fig_to_pil(fig):
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=120, facecolor=fig.get_facecolor())
-    buf.seek(0)
-    return Image.open(buf).convert('P', palette=Image.ADAPTIVE)
+def crop_to_roi_bbox(frames, roi_mask, pad=4):
+    ys, xs = np.where(roi_mask > 0)
+    if len(ys) == 0:
+        return frames
+    y0 = max(0, ys.min() - pad)
+    y1 = min(roi_mask.shape[0], ys.max() + pad + 1)
+    x0 = max(0, xs.min() - pad)
+    x1 = min(roi_mask.shape[1], xs.max() + pad + 1)
+    return [f[y0:y1, x0:x1] for f in frames]
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Render Partaker tracking CSV as a GIF')
-    parser.add_argument('csv', help='Path to enhanced_tracking_data_all_tracks.csv')
-    parser.add_argument('--pixel_size', type=float, default=0.0645)
-    parser.add_argument('--frame_interval', type=float, default=300)
+        description='Render real-movie binary masks from a Partaker '
+                    'segmentation cache as a GIF')
+    parser.add_argument('h5', nargs='?', default=DEFAULT_CACHE,
+                        help='Path to segmentation_cache.h5')
+    parser.add_argument('--position', type=int, default=0)
+    parser.add_argument('--channel', type=int, default=0)
     parser.add_argument('--frame_max', type=int, default=130)
-    parser.add_argument('--iptg_frame', type=int, default=28)
     parser.add_argument('--output', default='out/real.gif')
     parser.add_argument('--fps', type=int, default=10)
+    parser.add_argument('--roi_mask', default=DEFAULT_ROI,
+                        help='Path to roi_mask.npy; pass "" to skip ROI cropping')
     args = parser.parse_args()
 
-    print(f"Loading {args.csv} ...")
-    df = load_frames(args.csv, args.frame_max)
-    print(f"Kept {len(df)} cell-frames across {df.time_point.nunique()} frames")
+    print(f"Reading masks from {args.h5}")
+    print(f"  position={args.position}  channel={args.channel}  "
+          f"frame_max={args.frame_max}")
 
-    extents = figure_extents(df)
-    print(f"Extents (um): x [{extents[0]:.1f}, {extents[1]:.1f}] "
-          f"y [{extents[2]:.1f}, {extents[3]:.1f}]")
+    roi = None
+    if args.roi_mask:
+        roi = np.load(args.roi_mask)
+        print(f"Applied ROI mask {args.roi_mask}  shape={roi.shape}  "
+              f"keep_frac={float((roi>0).mean()):.3f}")
 
-    fig, ax = plt.subplots(figsize=(5, 5))
-    fig.patch.set_facecolor('#0b0b0b')
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.98, bottom=0.02)
-
-    frames = []
-    for t in range(args.frame_max + 1):
-        df_t = df[df.time_point == t]
-        render_frame(ax, df_t, args.pixel_size, extents,
-                     t, args.iptg_frame, args.frame_interval)
-        frames.append(fig_to_pil(fig))
-        if t % 10 == 0:
-            print(f"  rendered frame {t}/{args.frame_max}")
-
-    plt.close(fig)
+    masks = load_mask_frames(args.h5, args.position, args.channel,
+                             args.frame_max, roi_mask=roi)
+    if roi is not None:
+        masks = crop_to_roi_bbox(masks, roi)
+    print(f"Loaded {len(masks)} mask frames; size {masks[0].shape}")
 
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+    pil_frames = [Image.fromarray(m, mode='L').convert('P') for m in masks]
     duration_ms = int(1000 / args.fps)
-    frames[0].save(
+    pil_frames[0].save(
         args.output,
         save_all=True,
-        append_images=frames[1:],
+        append_images=pil_frames[1:],
         duration=duration_ms,
         loop=0,
         optimize=True,
     )
-    print(f"\nDone! GIF: {args.output}  ({len(frames)} frames @ {args.fps} fps)")
+    print(f"\nDone! GIF: {args.output}  "
+          f"({len(pil_frames)} frames @ {args.fps} fps)")
 
 
 if __name__ == '__main__':
