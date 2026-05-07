@@ -17,6 +17,8 @@ A digital twin of E. coli growth in a mother-chamber chip, seeded from real Part
 2. **Digital twin proper** — predict from frame 0 only, quantify divergence from reality.
 3. **Rule attribution** — add candidate rules one at a time until simulation matches reality.
 
+**Scope guardrail:** This paper is **mother-chamber single-cell dynamics**, NOT biofilm. Stage-3 rules to add are cell-level: growth rate, pressure/crowding inhibition, division asymmetry, mother-cell aging, IPTG response, channel flushing. **Do NOT propose biofilm-specific rules** (EPS, adhesion, hydrodynamics, quorum sensing, biofilm structure) — those belong to Nona's separate paper.
+
 End deliverable is **six slides**:
 1. Pitch ("one frame in, 8 hours out")
 2. Real vs simulated, side-by-side video
