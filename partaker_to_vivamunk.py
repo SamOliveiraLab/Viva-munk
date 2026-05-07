@@ -150,16 +150,22 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None):
     agents = build_agents(cells, env_size)
     print(f"Created {len(agents)} agents")
 
-    # Stage-1 baseline: Viva-munk defaults, no calibration from data.
+    # Rate + mutate left at framework defaults. Threshold scaled to µm cell
+    # size — unit conversion so the framework operates at our scale.
     rate = 0.000289
-    print(f"Growth params: Viva-munk DEFAULTS "
-          f"(rate={rate} /s ~40-min doubling, threshold=100.0, mutate=False)")
+    sample = list(agents.values())[0]
+    division_threshold = 0.02 * (2 * sample['radius']) * (sample['length'] * 2.0)
+    print(f"Growth params: rate={rate} /s (default ~40-min doubling), "
+          f"threshold={division_threshold:.4f} (scaled to µm cell size), mutate=False")
 
     initial_state = {'cells': agents, 'particles': {}}
     add_grow_divide_to_agents(
         initial_state,
         agents_key='cells',
-        config={'agents_key': 'cells'},
+        config={
+            'agents_key': 'cells',
+            'threshold': division_threshold,
+        },
     )
 
     interval = 30.0
