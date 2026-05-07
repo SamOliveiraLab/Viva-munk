@@ -147,25 +147,19 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None):
     env_size = max(env_size, 30.0)
     print(f"Environment size: {env_size:.1f} um")
 
-    rate, avg_dt, n_div = estimate_growth_rate(cells, frame_interval)
-    print(f"Growth rate: {rate:.6f} /s  (doubling {avg_dt:.0f}s = {avg_dt/60:.1f} min, n={n_div})")
-
     agents = build_agents(cells, env_size)
     print(f"Created {len(agents)} agents")
 
-    sample = list(agents.values())[0]
-    division_threshold = 0.02 * (2 * sample['radius']) * (sample['length'] * 2.0)
+    # Stage-1 baseline: Viva-munk defaults, no calibration from data.
+    rate = 0.000289
+    print(f"Growth params: Viva-munk DEFAULTS "
+          f"(rate={rate} /s ~40-min doubling, threshold=100.0, mutate=False)")
 
     initial_state = {'cells': agents, 'particles': {}}
     add_grow_divide_to_agents(
         initial_state,
         agents_key='cells',
-        config={
-            'agents_key': 'cells',
-            'rate': rate,
-            'threshold': division_threshold,
-            'mutate': True,
-        },
+        config={'agents_key': 'cells'},
     )
 
     interval = 30.0
