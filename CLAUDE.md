@@ -25,6 +25,27 @@ A digital twin of E. coli growth in a mother-chamber chip, seeded from real Part
 
 **Plus dataset-specific candidates:** growth rate variability, division asymmetry, mother-cell aging, IPTG response (post-frame-28), channel flushing geometry.
 
+## The full story — paper arc in plain terms
+
+Two movies side by side: **real** (microscope) and **sim** (digital twin started from frame 0 only). Both get measured for the same metrics:
+
+- **Density** — where cells cluster
+- **Motility** — how cells move
+- **Physical constraints** — walls, flow direction, crowdness
+- **Cell count, total area, mean position** (the basic time-series)
+
+Compute a **goodness-of-fit** — single number summarizing how close sim is to real. Then iterate: **add one rule → re-run → re-measure → fit improves?** Keep the rules that close the gap. The rules that close the gap = the biology that governs the real experiment. **That's the paper.**
+
+Sam's pitch line: "give me one frame, I'll give you the rest of the experiment."
+
+## External collaborators
+
+- **COMSOL collaborator** — supplies hydrodynamics simulation data for the chip geometry. Bukola will receive COMSOL data and feed it as the "environment" rule (Stage 3, hydrodynamics layer). Don't wait for COMSOL data to ship Stages 1–2.
+
+## Slide deck deadline
+
+Bukola is presenting **tomorrow** (slides at minimum). Tonight's job is producing the four artifacts (`sim.gif`, `real.gif`, `real_vs_sim.gif`, `divergence.png`) so slides 1–3 are real. Slides 4–6 (rules table, final match, what-this-unlocks) are framed as the roadmap, not yet results.
+
 End deliverable is **six slides**:
 1. Pitch ("one frame in, 8 hours out")
 2. Real vs simulated, side-by-side video
