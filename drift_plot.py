@@ -73,7 +73,7 @@ def _to_float(s):
 
 
 def _frame_value(row):
-    for k in ('frame', 'frame_idx', 'time', 'time_index', 't'):
+    for k in ('frame', 'frame_idx', 'time_point', 'time', 'time_index', 't'):
         if k in row:
             v = _to_float(row[k])
             if v is not None:
