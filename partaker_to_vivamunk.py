@@ -22,6 +22,7 @@ import os
 from process_bigraph.emitter import emitter_from_wires
 from multi_cell.processes.grow_divide import add_grow_divide_to_agents
 from multi_cell.processes.remove_crossing import make_remove_crossing_process
+from multi_cell.processes.flow_drag import make_flow_drag_process
 from multi_cell.experiments.runner import run_experiment
 
 
@@ -133,7 +134,7 @@ def build_agents(cells, env_size):
 # ── document builder ─────────────────────────────────────────────────
 
 def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
-                  hydro=False):
+                  hydro=False, hydro_velocity_csv='', hydro_pressure_csv=''):
     """Returns (document_fn, env_size, growth_rate, n_cells)."""
 
     cells = load_partaker_cells(csv_path, pixel_size)
@@ -171,16 +172,22 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
 
     interval = 30.0
     flow_x = env_size * 0.95
-    # Stage-3 environment rule: first-order hydrodynamics proxy. Adds an
-    # outlet flush at the y boundary (in addition to the existing x outlet),
-    # representing bulk flow at the chamber opening.
-    flow_y = env_size * 0.85 if hydro else None
-    if hydro:
-        print(f"Hydrodynamics rule: ON (y-outlet at {flow_y:.1f} um)")
     n_cells = len(agents)
+    # Stage-3 environment rule: real low-Reynolds Stokes-drag flow field.
+    # At bacterial scale (Re ~ 1e-5), v_cell ≈ v_fluid, so cells are advected
+    # by a parameterised flow profile. Linear shear along x from closed wall
+    # (x=0) to the outlet at flow_x — same axis as the existing remove_crossing
+    # boundary, so flow drives cells toward the outlet rather than into a wall.
+    # Analytical first-pass profile; COMSOL flow field swaps in here later.
+    hydro_v_max = 0.05  # um/s at outlet
+    hydro_shear_rate = hydro_v_max / flow_x  # 1/s, ∂v_x/∂x
+    if hydro:
+        print(f"Hydrodynamics rule: ON  v_x(x) = {hydro_v_max} um/s × (x / "
+              f"{flow_x:.1f}), shear ∂v/∂x = {hydro_shear_rate:.4g} 1/s, "
+              f"low-Re Stokes-drag limit (mu_water ≈ 6.91e-4 Pa·s)")
 
     def document_fn(config=None):
-        return {
+        doc = {
             'cells':     initial_state['cells'],
             'particles': initial_state['particles'],
             'multibody': {
@@ -202,7 +209,6 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
             },
             'remove_crossing': make_remove_crossing_process(
                 x_max=flow_x,
-                y_max=flow_y,
                 agents_key='cells',
             ),
             'emitter': emitter_from_wires({
@@ -211,6 +217,25 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
                 'time': ['global_time'],
             }),
         }
+        if hydro:
+            if hydro_velocity_csv and hydro_pressure_csv:
+                doc['flow_drag'] = make_flow_drag_process(
+                    mode='comsol',
+                    velocity_csv=hydro_velocity_csv,
+                    pressure_csv=hydro_pressure_csv,
+                    interval=interval,
+                    agents_key='cells',
+                )
+            else:
+                doc['flow_drag'] = make_flow_drag_process(
+                    mode='analytical',
+                    v_max=hydro_v_max,
+                    axis_max=flow_x,
+                    axis='x',
+                    interval=interval,
+                    agents_key='cells',
+                )
+        return doc
 
     return document_fn, env_size, rate, n_cells
 
@@ -230,8 +255,14 @@ def main():
     parser.add_argument('--max_cells', type=int, default=None,
                         help='Cap number of frame-0 cells loaded (smoke tests)')
     parser.add_argument('--hydro', action='store_true',
-                        help='Enable first-order hydrodynamics rule '
-                             '(y-axis outlet flush, environment layer)')
+                        help='Enable hydrodynamics rule (Stokes-drag flow on cells)')
+    parser.add_argument('--hydro_velocity_csv', default='',
+                        help='COMSOL velocity CSV (cell_id,x,y,z,velocity_m_s). '
+                             'If set together with --hydro_pressure_csv, real '
+                             'chamber flow is used; otherwise analytical shear.')
+    parser.add_argument('--hydro_pressure_csv', default='',
+                        help='COMSOL pressure CSV (cell_id,x,y,z,pressure_Pa). '
+                             'Pressure gradient gives flow direction.')
     args = parser.parse_args()
 
     print(f"\n{'='*50}")
@@ -247,6 +278,8 @@ def main():
         args.csv, args.pixel_size, args.frame_interval,
         max_cells=args.max_cells,
         hydro=args.hydro,
+        hydro_velocity_csv=args.hydro_velocity_csv,
+        hydro_pressure_csv=args.hydro_pressure_csv,
     )
 
     entry = {

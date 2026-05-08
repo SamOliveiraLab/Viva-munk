@@ -18,6 +18,7 @@ from bigraph_viz import register_types as viz_register_types
 from multi_cell.processes.multibody import PymunkProcess
 from multi_cell.processes.grow_divide import GrowDivide, AdderGrowDivide
 from multi_cell.processes.remove_crossing import RemoveCrossing
+from multi_cell.processes.flow_drag import FlowDrag
 from multi_cell.processes.secrete_eps import SecreteEPS
 from multi_cell.processes.pressure import Pressure
 from multi_cell.processes.diffusion_advection import DiffusionAdvection
@@ -80,6 +81,7 @@ def register_processes(core):
     core.register_link('GrowDivide', GrowDivide)
     core.register_link('AdderGrowDivide', AdderGrowDivide)
     core.register_link('RemoveCrossing', RemoveCrossing)
+    core.register_link('FlowDrag', FlowDrag)
     core.register_link('SecreteEPS', SecreteEPS)
     core.register_link('Pressure', Pressure)
     core.register_link('DiffusionAdvection', DiffusionAdvection)

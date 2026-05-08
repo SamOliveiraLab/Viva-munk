@@ -135,10 +135,13 @@ def _capsule_area_um(length_um, radius_um):
 
 
 def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
-                           max_cells, sim_time, hydro=False):
+                           max_cells, sim_time, hydro=False,
+                           hydro_velocity_csv='', hydro_pressure_csv=''):
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
         hydro=hydro,
+        hydro_velocity_csv=hydro_velocity_csv,
+        hydro_pressure_csv=hydro_pressure_csv,
     )
     document = doc_fn({'env_size': env_size})
     sim = Composite({'state': document}, core=PYMUNK_CORE)
@@ -161,6 +164,8 @@ def load_or_run_sim(pickle_path, hydro, args):
     results, env_size = run_sim_for_trajectory(
         args.sim_csv, args.pixel_size, args.frame_interval,
         args.max_cells, args.sim_time, hydro=hydro,
+        hydro_velocity_csv=args.hydro_velocity_csv if hydro else '',
+        hydro_pressure_csv=args.hydro_pressure_csv if hydro else '',
     )
     if pickle_path:
         os.makedirs(os.path.dirname(pickle_path) or '.', exist_ok=True)
@@ -280,6 +285,10 @@ def main():
                    help='Cache for the framework-defaults sim.')
     p.add_argument('--sim_pickle_hydro', default='out/sim_hydro.pkl',
                    help='Cache for defaults + hydrodynamics sim.')
+    p.add_argument('--hydro_velocity_csv', default='',
+                   help='COMSOL velocity CSV; if set, hydro sim uses real chamber flow.')
+    p.add_argument('--hydro_pressure_csv', default='',
+                   help='COMSOL pressure CSV (pairs with --hydro_velocity_csv).')
     args = p.parse_args()
 
     print('Real data:')
