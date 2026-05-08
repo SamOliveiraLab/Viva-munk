@@ -136,12 +136,15 @@ def _capsule_area_um(length_um, radius_um):
 
 def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
                            max_cells, sim_time, hydro=False,
-                           hydro_velocity_csv='', hydro_pressure_csv=''):
+                           hydro_velocity_csv='', hydro_pressure_csv='',
+                           hydro_negate_vx=False, hydro_negate_vy=False):
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
         hydro=hydro,
         hydro_velocity_csv=hydro_velocity_csv,
         hydro_pressure_csv=hydro_pressure_csv,
+        hydro_negate_vx=hydro_negate_vx,
+        hydro_negate_vy=hydro_negate_vy,
     )
     document = doc_fn({'env_size': env_size})
     sim = Composite({'state': document}, core=PYMUNK_CORE)
@@ -166,6 +169,8 @@ def load_or_run_sim(pickle_path, hydro, args):
         args.max_cells, args.sim_time, hydro=hydro,
         hydro_velocity_csv=args.hydro_velocity_csv if hydro else '',
         hydro_pressure_csv=args.hydro_pressure_csv if hydro else '',
+        hydro_negate_vx=args.hydro_negate_vx if hydro else False,
+        hydro_negate_vy=args.hydro_negate_vy if hydro else False,
     )
     if pickle_path:
         os.makedirs(os.path.dirname(pickle_path) or '.', exist_ok=True)
@@ -289,6 +294,10 @@ def main():
                    help='COMSOL velocity CSV; if set, hydro sim uses real chamber flow.')
     p.add_argument('--hydro_pressure_csv', default='',
                    help='COMSOL pressure CSV (pairs with --hydro_velocity_csv).')
+    p.add_argument('--hydro_negate_vx', action='store_true',
+                   help='Flip x-component of COMSOL flow direction.')
+    p.add_argument('--hydro_negate_vy', action='store_true',
+                   help='Flip y-component of COMSOL flow direction.')
     args = p.parse_args()
 
     print('Real data:')

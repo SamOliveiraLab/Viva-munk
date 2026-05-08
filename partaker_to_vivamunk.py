@@ -134,7 +134,8 @@ def build_agents(cells, env_size):
 # ── document builder ─────────────────────────────────────────────────
 
 def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
-                  hydro=False, hydro_velocity_csv='', hydro_pressure_csv=''):
+                  hydro=False, hydro_velocity_csv='', hydro_pressure_csv='',
+                  hydro_negate_vx=False, hydro_negate_vy=False):
     """Returns (document_fn, env_size, growth_rate, n_cells)."""
 
     cells = load_partaker_cells(csv_path, pixel_size)
@@ -223,6 +224,8 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
                     mode='comsol',
                     velocity_csv=hydro_velocity_csv,
                     pressure_csv=hydro_pressure_csv,
+                    negate_vx=hydro_negate_vx,
+                    negate_vy=hydro_negate_vy,
                     interval=interval,
                     agents_key='cells',
                 )
@@ -263,6 +266,11 @@ def main():
     parser.add_argument('--hydro_pressure_csv', default='',
                         help='COMSOL pressure CSV (cell_id,x,y,z,pressure_Pa). '
                              'Pressure gradient gives flow direction.')
+    parser.add_argument('--hydro_negate_vx', action='store_true',
+                        help='Flip x-component of COMSOL flow (use if COMSOL '
+                             'chamber outlet is mirrored relative to sim).')
+    parser.add_argument('--hydro_negate_vy', action='store_true',
+                        help='Flip y-component of COMSOL flow.')
     args = parser.parse_args()
 
     print(f"\n{'='*50}")
@@ -280,6 +288,8 @@ def main():
         hydro=args.hydro,
         hydro_velocity_csv=args.hydro_velocity_csv,
         hydro_pressure_csv=args.hydro_pressure_csv,
+        hydro_negate_vx=args.hydro_negate_vx,
+        hydro_negate_vy=args.hydro_negate_vy,
     )
 
     entry = {

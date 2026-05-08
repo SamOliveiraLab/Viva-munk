@@ -50,6 +50,11 @@ class FlowDrag(Step):
         # than the chamber when the COMSOL field has high-velocity zones
         # (e.g. main-channel boundary). Set to <=0 to disable.
         'v_cap':           {'_type': 'float',  '_default': 2.0},
+        # Sign flips for the reconstructed flow vector. Use these when the
+        # COMSOL chamber orientation is mirrored relative to the sim chamber
+        # (e.g. COMSOL outlet at low-x but sim outlet at high-x).
+        'negate_vx':       {'_type': 'boolean', '_default': False},
+        'negate_vy':       {'_type': 'boolean', '_default': False},
         # shared
         'interval':        {'_type': 'float',  '_default': 30.0},
         'viscosity':       {'_type': 'float',  '_default': 6.91e-4},
@@ -104,6 +109,8 @@ class FlowDrag(Step):
         self._p_tree = cKDTree(p_xy)
         self._k     = int(self.config['k_neighbors'])
         self._v_cap = float(self.config['v_cap'])
+        self._sx    = -1.0 if self.config['negate_vx'] else 1.0
+        self._sy    = -1.0 if self.config['negate_vy'] else 1.0
         # Bounding box of the COMSOL domain. Outside this, the kd-tree
         # gradient fit extrapolates and blows up — clamp to zero flow there.
         self._x_min = float(min(v_xy[:, 0].min(), p_xy[:, 0].min()))
@@ -170,7 +177,9 @@ class FlowDrag(Step):
                 scale = self._v_cap / speed
                 vx *= scale
                 vy *= scale
-        return vx, vy
+        # 6) Apply orientation flips if the COMSOL chamber is mirrored
+        # relative to the sim chamber.
+        return vx * self._sx, vy * self._sy
 
     # ── Step interface ──────────────────────────────────────────────
 
@@ -207,7 +216,7 @@ def make_flow_drag_process(
     mode='analytical',
     v_max=0.1, axis_max=70.0, axis='y',
     velocity_csv='', pressure_csv='', k_neighbors=8, velocity_units='m/s',
-    v_cap=2.0,
+    v_cap=2.0, negate_vx=False, negate_vy=False,
     interval=30.0, viscosity=6.91e-4, agents_key='cells',
 ):
     return {
@@ -223,6 +232,8 @@ def make_flow_drag_process(
             'k_neighbors': k_neighbors,
             'velocity_units': velocity_units,
             'v_cap': v_cap,
+            'negate_vx': negate_vx,
+            'negate_vy': negate_vy,
             'interval': interval,
             'viscosity': viscosity,
             'agents_key': agents_key,
