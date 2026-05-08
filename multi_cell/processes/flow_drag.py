@@ -181,6 +181,13 @@ class FlowDrag(Step):
         return {'agents': 'map[pymunk_agent]'}
 
     def update(self, state):
+        # In the low-Reynolds limit (Re ~ 1e-5 at bacterial scale) the cell
+        # velocity relaxes to the fluid velocity within microseconds, so we
+        # SET cell.velocity to v_fluid each step and let pymunk integrate
+        # position. Updating cell.location directly causes pymunk to re-derive
+        # velocity from the position delta, which double-counts the flow
+        # advection and produces an exponentially growing velocity (doubles
+        # every step → cells fly off to ~1e80 µm by t=8100s).
         agents = state.get('agents', {}) or {}
         updates = {}
         for aid, agent in agents.items():
@@ -192,7 +199,7 @@ class FlowDrag(Step):
                 vx, vy = self._v_fluid_comsol(x, y)
             else:
                 vx, vy = self._v_fluid_analytical(x, y)
-            updates[aid] = {'location': (x + vx * self.dt, y + vy * self.dt)}
+            updates[aid] = {'velocity': (vx, vy)}
         return {'agents': updates}
 
 
