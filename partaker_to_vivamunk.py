@@ -132,7 +132,8 @@ def build_agents(cells, env_size):
 
 # ── document builder ─────────────────────────────────────────────────
 
-def make_document(csv_path, pixel_size, frame_interval, max_cells=None):
+def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
+                  hydro=False):
     """Returns (document_fn, env_size, growth_rate, n_cells)."""
 
     cells = load_partaker_cells(csv_path, pixel_size)
@@ -170,6 +171,12 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None):
 
     interval = 30.0
     flow_x = env_size * 0.95
+    # Stage-3 environment rule: first-order hydrodynamics proxy. Adds an
+    # outlet flush at the y boundary (in addition to the existing x outlet),
+    # representing bulk flow at the chamber opening.
+    flow_y = env_size * 0.85 if hydro else None
+    if hydro:
+        print(f"Hydrodynamics rule: ON (y-outlet at {flow_y:.1f} um)")
     n_cells = len(agents)
 
     def document_fn(config=None):
@@ -195,6 +202,7 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None):
             },
             'remove_crossing': make_remove_crossing_process(
                 x_max=flow_x,
+                y_max=flow_y,
                 agents_key='cells',
             ),
             'emitter': emitter_from_wires({
@@ -221,6 +229,9 @@ def main():
                         help='Simulation seconds (default: 28800 = 8h)')
     parser.add_argument('--max_cells', type=int, default=None,
                         help='Cap number of frame-0 cells loaded (smoke tests)')
+    parser.add_argument('--hydro', action='store_true',
+                        help='Enable first-order hydrodynamics rule '
+                             '(y-axis outlet flush, environment layer)')
     args = parser.parse_args()
 
     print(f"\n{'='*50}")
@@ -235,6 +246,7 @@ def main():
     doc_fn, env_size, rate, n_cells = make_document(
         args.csv, args.pixel_size, args.frame_interval,
         max_cells=args.max_cells,
+        hydro=args.hydro,
     )
 
     entry = {

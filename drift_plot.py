@@ -54,8 +54,9 @@ plt.rcParams.update({
     'axes.facecolor': 'white',
 })
 
-REAL_COLOR = '#1f4e79'
-SIM_COLOR  = '#c4393a'
+REAL_COLOR  = '#1f4e79'
+SIM_COLOR   = '#c4393a'
+HYDRO_COLOR = '#2ca02c'
 GUIDE_COLOR = '#888888'
 
 PRE_IPTG_LAST_FRAME = 27
@@ -134,9 +135,10 @@ def _capsule_area_um(length_um, radius_um):
 
 
 def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
-                           max_cells, sim_time):
+                           max_cells, sim_time, hydro=False):
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
+        hydro=hydro,
     )
     document = doc_fn({'env_size': env_size})
     sim = Composite({'state': document}, core=PYMUNK_CORE)
@@ -144,9 +146,30 @@ def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
     sim.run(sim_time)
     elapsed = time.time() - t0
     results = gather_emitter_results(sim)[('emitter',)]
-    print(f"  sim: {len(results)} emit steps in {elapsed:.1f} s "
+    label = 'with hydro' if hydro else 'defaults'
+    print(f"  sim ({label}): {len(results)} emit steps in {elapsed:.1f} s "
           f"(seed cells: {n_cells})")
     return results, env_size
+
+
+def load_or_run_sim(pickle_path, hydro, args):
+    if pickle_path and os.path.exists(pickle_path):
+        with open(pickle_path, 'rb') as f:
+            payload = pickle.load(f)
+        print(f"  reused pickle: {pickle_path} ({len(payload['results'])} steps)")
+        return payload['results']
+    results, env_size = run_sim_for_trajectory(
+        args.sim_csv, args.pixel_size, args.frame_interval,
+        args.max_cells, args.sim_time, hydro=hydro,
+    )
+    if pickle_path:
+        os.makedirs(os.path.dirname(pickle_path) or '.', exist_ok=True)
+        with open(pickle_path, 'wb') as f:
+            pickle.dump({'results': results, 'env_size': env_size,
+                         'sim_time': args.sim_time,
+                         'max_cells': args.max_cells, 'hydro': hydro}, f)
+        print(f"  pickled: {pickle_path}")
+    return results
 
 
 def sim_trajectory(results, max_time_s=PRE_IPTG_END_MIN * 60):
@@ -178,28 +201,35 @@ def sim_trajectory(results, max_time_s=PRE_IPTG_END_MIN * 60):
 
 # ── plot ─────────────────────────────────────────────────────────────
 
-def make_plot(t_real, n_real, a_real, t_sim, n_sim, a_sim, out_path):
-    if n_real[0] == 0 or n_sim[0] == 0:
+def make_plot(t_real, n_real, a_real,
+              t_sim, n_sim, a_sim,
+              t_hyd, n_hyd, a_hyd,
+              out_path):
+    if n_real[0] == 0 or n_sim[0] == 0 or n_hyd[0] == 0:
         raise ValueError("First-timepoint count is zero; cannot normalize.")
 
     n_real_n = n_real / n_real[0]
     a_real_n = a_real / a_real[0]
     n_sim_n  = n_sim  / n_sim[0]
     a_sim_n  = a_sim  / a_sim[0]
+    n_hyd_n  = n_hyd  / n_hyd[0]
+    a_hyd_n  = a_hyd  / a_hyd[0]
 
     fig, (ax_n, ax_a) = plt.subplots(
-        2, 1, figsize=(7.0, 7.6), sharex=True,
+        2, 1, figsize=(7.2, 7.8), sharex=True,
         gridspec_kw={'hspace': 0.18},
     )
 
-    for ax, real_n, sim_n, ylabel, title in (
-        (ax_n, n_real_n, n_sim_n, r'Cell count   $N(t)/N(0)$',
-         'Population growth'),
-        (ax_a, a_real_n, a_sim_n, r'Total area   $A(t)/A(0)$',
-         'Biomass growth'),
+    for ax, real_n, sim_n, hyd_n, ylabel, title in (
+        (ax_n, n_real_n, n_sim_n, n_hyd_n,
+         r'Cell count   $N(t)/N(0)$', 'Population growth'),
+        (ax_a, a_real_n, a_sim_n, a_hyd_n,
+         r'Total area   $A(t)/A(0)$', 'Biomass growth'),
     ):
         ax.plot(t_sim, sim_n, '-', color=SIM_COLOR, lw=2.0,
-                label='Sim (framework defaults)')
+                label='Sim (defaults)')
+        ax.plot(t_hyd, hyd_n, '-', color=HYDRO_COLOR, lw=2.0,
+                label='Sim + hydrodynamics')
         ax.plot(t_real, real_n, 'o-', color=REAL_COLOR, lw=1.6, ms=4.5,
                 label='Real (Partaker)')
         ax.set_yscale('log')
@@ -246,8 +276,10 @@ def main():
     p.add_argument('--max_cells', type=int, default=50)
     p.add_argument('--sim_time', type=float, default=PRE_IPTG_END_MIN * 60)
     p.add_argument('--out', default='out/divergence.png')
-    p.add_argument('--sim_pickle', default='out/sim_results.pkl',
-                   help='Reuse this pickle if present (skip the sim).')
+    p.add_argument('--sim_pickle', default='out/sim_default.pkl',
+                   help='Cache for the framework-defaults sim.')
+    p.add_argument('--sim_pickle_hydro', default='out/sim_hydro.pkl',
+                   help='Cache for defaults + hydrodynamics sim.')
     args = p.parse_args()
 
     print('Real data:')
@@ -259,25 +291,25 @@ def main():
           f"count {int(n_real[0])} -> {int(n_real[-1])}   "
           f"area {a_real[0]:.1f} -> {a_real[-1]:.1f} um^2")
 
-    print('Sim data:')
-    if args.sim_pickle and os.path.exists(args.sim_pickle):
-        with open(args.sim_pickle, 'rb') as f:
-            payload = pickle.load(f)
-        results = payload['results']
-        print(f"  reused pickle: {args.sim_pickle} ({len(results)} steps)")
-    else:
-        results, _env = run_sim_for_trajectory(
-            args.sim_csv, args.pixel_size, args.frame_interval,
-            args.max_cells, args.sim_time,
-        )
-
-    t_sim, n_sim, a_sim = sim_trajectory(results, max_time_s=args.sim_time)
+    print('Sim (framework defaults):')
+    results_def = load_or_run_sim(args.sim_pickle, hydro=False, args=args)
+    t_sim, n_sim, a_sim = sim_trajectory(results_def, max_time_s=args.sim_time)
     print(f"  steps:  {len(t_sim)}   "
           f"count {int(n_sim[0])} -> {int(n_sim[-1])}   "
           f"area {a_sim[0]:.1f} -> {a_sim[-1]:.1f} um^2")
 
+    print('Sim (defaults + hydrodynamics):')
+    results_hyd = load_or_run_sim(args.sim_pickle_hydro, hydro=True, args=args)
+    t_hyd, n_hyd, a_hyd = sim_trajectory(results_hyd, max_time_s=args.sim_time)
+    print(f"  steps:  {len(t_hyd)}   "
+          f"count {int(n_hyd[0])} -> {int(n_hyd[-1])}   "
+          f"area {a_hyd[0]:.1f} -> {a_hyd[-1]:.1f} um^2")
+
     print('Plotting:')
-    make_plot(t_real, n_real, a_real, t_sim, n_sim, a_sim, args.out)
+    make_plot(t_real, n_real, a_real,
+              t_sim, n_sim, a_sim,
+              t_hyd, n_hyd, a_hyd,
+              args.out)
 
 
 if __name__ == '__main__':
