@@ -46,6 +46,10 @@ class FlowDrag(Step):
         'pressure_csv':    {'_type': 'string', '_default': ''},
         'k_neighbors':     {'_type': 'integer', '_default': 8},
         'velocity_units':  {'_type': 'string', '_default': 'm/s'},  # or 'um/s'
+        # Cap on |v_fluid| in um/s. Prevents single-step transport larger
+        # than the chamber when the COMSOL field has high-velocity zones
+        # (e.g. main-channel boundary). Set to <=0 to disable.
+        'v_cap':           {'_type': 'float',  '_default': 2.0},
         # shared
         'interval':        {'_type': 'float',  '_default': 30.0},
         'viscosity':       {'_type': 'float',  '_default': 6.91e-4},
@@ -98,11 +102,21 @@ class FlowDrag(Step):
         self._p_xy  = p_xy
         self._p_val = p_val.astype(float)
         self._p_tree = cKDTree(p_xy)
-        self._k = int(self.config['k_neighbors'])
+        self._k     = int(self.config['k_neighbors'])
+        self._v_cap = float(self.config['v_cap'])
+        # Bounding box of the COMSOL domain. Outside this, the kd-tree
+        # gradient fit extrapolates and blows up — clamp to zero flow there.
+        self._x_min = float(min(v_xy[:, 0].min(), p_xy[:, 0].min()))
+        self._x_max = float(max(v_xy[:, 0].max(), p_xy[:, 0].max()))
+        self._y_min = float(min(v_xy[:, 1].min(), p_xy[:, 1].min()))
+        self._y_max = float(max(v_xy[:, 1].max(), p_xy[:, 1].max()))
         print(f"FlowDrag(comsol): velocity samples {len(v_xy)}  "
               f"|v| range {v_mag.min():.3g}–{v_mag.max():.3g} um/s   "
               f"pressure samples {len(p_xy)}  "
-              f"p range {p_val.min():.3f}–{p_val.max():.3f} Pa")
+              f"p range {p_val.min():.3f}–{p_val.max():.3f} Pa  "
+              f"domain x∈[{self._x_min:.1f},{self._x_max:.1f}] "
+              f"y∈[{self._y_min:.1f},{self._y_max:.1f}]  "
+              f"|v| cap {self._v_cap} um/s")
 
     # ── velocity-field lookups ──────────────────────────────────────
 
@@ -114,7 +128,14 @@ class FlowDrag(Step):
         return self.v_max * frac, 0.0
 
     def _v_fluid_comsol(self, x, y):
-        # |v| from k-nearest velocity samples (inverse-distance weighting)
+        # 1) Outside COMSOL domain → no flow. The kd-tree query keeps
+        # returning neighbors clustered on one side of the cell, which makes
+        # the ∇p fit extrapolate and blow up exponentially.
+        if not (self._x_min <= x <= self._x_max and
+                self._y_min <= y <= self._y_max):
+            return 0.0, 0.0
+
+        # 2) |v| from k-nearest velocity samples (inverse-distance weighting)
         dists, idxs = self._v_tree.query([x, y], k=self._k)
         if dists[0] < 1e-9:
             v_mag = float(self._v_mag[idxs[0]])
@@ -122,7 +143,7 @@ class FlowDrag(Step):
             w = 1.0 / dists
             v_mag = float(np.sum(w * self._v_mag[idxs]) / np.sum(w))
 
-        # ∇p from least-squares plane fit through k-nearest pressure samples
+        # 3) ∇p from least-squares plane fit through k-nearest pressure samples
         _, p_idx = self._p_tree.query([x, y], k=self._k)
         Xs = self._p_xy[p_idx, 0]
         Ys = self._p_xy[p_idx, 1]
@@ -136,8 +157,20 @@ class FlowDrag(Step):
         gmag = math.sqrt(gx * gx + gy * gy)
         if gmag < 1e-12:
             return 0.0, 0.0
-        # Stokes / low-Re: flow points down the pressure gradient
-        return v_mag * (-gx / gmag), v_mag * (-gy / gmag)
+        # 4) Stokes / low-Re: flow points down the pressure gradient
+        vx = v_mag * (-gx / gmag)
+        vy = v_mag * (-gy / gmag)
+
+        # 5) Cap |v| so a single dt step can't transport farther than the cap
+        # allows. Defends against high-flow regions in the COMSOL data
+        # (e.g. main-channel boundary leaking into the chamber field).
+        if self._v_cap > 0.0:
+            speed = math.sqrt(vx * vx + vy * vy)
+            if speed > self._v_cap:
+                scale = self._v_cap / speed
+                vx *= scale
+                vy *= scale
+        return vx, vy
 
     # ── Step interface ──────────────────────────────────────────────
 
@@ -167,6 +200,7 @@ def make_flow_drag_process(
     mode='analytical',
     v_max=0.1, axis_max=70.0, axis='y',
     velocity_csv='', pressure_csv='', k_neighbors=8, velocity_units='m/s',
+    v_cap=2.0,
     interval=30.0, viscosity=6.91e-4, agents_key='cells',
 ):
     return {
@@ -181,6 +215,7 @@ def make_flow_drag_process(
             'pressure_csv': pressure_csv,
             'k_neighbors': k_neighbors,
             'velocity_units': velocity_units,
+            'v_cap': v_cap,
             'interval': interval,
             'viscosity': viscosity,
             'agents_key': agents_key,
