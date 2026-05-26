@@ -30,6 +30,8 @@ import h5py
 import numpy as np
 from PIL import Image
 
+from palette import labels_to_rgb
+
 
 DEFAULT_CACHE = (
     '/Volumes/SAM1/server_workspace_backup/Bukola/partaker_dataset_DT/'
@@ -42,7 +44,14 @@ DEFAULT_ROI = (
 ARRAY_KEY = 'mmap_arrays/omnipose_bact_phase/array'
 
 
-def load_mask_frames(h5_path, position, channel, frame_max, roi_mask=None):
+def load_mask_frames(h5_path, position, channel, frame_max, roi_mask=None,
+                      color=True):
+    """Return a list of frames.
+
+    If color=True, each frame is (H, W, 3) uint8 with every cell painted
+    using its omnipose instance label (per-frame, not persistent).
+    If color=False, each frame is (H, W) uint8, 255 wherever a cell sits.
+    """
     with h5py.File(h5_path, 'r') as f:
         arr = f[ARRAY_KEY]
         n_frames_avail = arr.shape[0]
@@ -50,10 +59,17 @@ def load_mask_frames(h5_path, position, channel, frame_max, roi_mask=None):
         frames = []
         for t in range(last + 1):
             labels = arr[t, position, channel]
-            mask = (labels > 0).astype(np.uint8) * 255
-            if roi_mask is not None:
-                mask = np.where(roi_mask > 0, mask, 0).astype(np.uint8)
-            frames.append(mask)
+            if color:
+                rgb = labels_to_rgb(labels)
+                if roi_mask is not None:
+                    rgb = np.where((roi_mask > 0)[..., None], rgb, 0
+                                    ).astype(np.uint8)
+                frames.append(rgb)
+            else:
+                mask = (labels > 0).astype(np.uint8) * 255
+                if roi_mask is not None:
+                    mask = np.where(roi_mask > 0, mask, 0).astype(np.uint8)
+                frames.append(mask)
             if t % 10 == 0:
                 print(f"  loaded frame {t}/{last}")
         return frames
@@ -67,13 +83,18 @@ def crop_to_roi_bbox(frames, roi_mask, pad=4):
     y1 = min(roi_mask.shape[0], ys.max() + pad + 1)
     x0 = max(0, xs.min() - pad)
     x1 = min(roi_mask.shape[1], xs.max() + pad + 1)
-    return [f[y0:y1, x0:x1] for f in frames]
+    cropped = []
+    for f in frames:
+        if f.ndim == 3:
+            cropped.append(f[y0:y1, x0:x1, :])
+        else:
+            cropped.append(f[y0:y1, x0:x1])
+    return cropped
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Render real-movie binary masks from a Partaker '
-                    'segmentation cache as a GIF')
+        description='Render real-movie omnipose labels as a colored GIF')
     parser.add_argument('h5', nargs='?', default=DEFAULT_CACHE,
                         help='Path to segmentation_cache.h5')
     parser.add_argument('--position', type=int, default=0)
@@ -83,11 +104,15 @@ def main():
     parser.add_argument('--fps', type=int, default=10)
     parser.add_argument('--roi_mask', default=DEFAULT_ROI,
                         help='Path to roi_mask.npy; pass "" to skip ROI cropping')
+    parser.add_argument('--binary', action='store_true',
+                        help='Fall back to white-on-black binary (old behavior)')
     args = parser.parse_args()
 
+    use_color = not args.binary
     print(f"Reading masks from {args.h5}")
     print(f"  position={args.position}  channel={args.channel}  "
-          f"frame_max={args.frame_max}")
+          f"frame_max={args.frame_max}  "
+          f"mode={'colored by label' if use_color else 'binary'}")
 
     roi = None
     if args.roi_mask:
@@ -96,13 +121,18 @@ def main():
               f"keep_frac={float((roi>0).mean()):.3f}")
 
     masks = load_mask_frames(args.h5, args.position, args.channel,
-                             args.frame_max, roi_mask=roi)
+                             args.frame_max, roi_mask=roi, color=use_color)
     if roi is not None:
         masks = crop_to_roi_bbox(masks, roi)
     print(f"Loaded {len(masks)} mask frames; size {masks[0].shape}")
 
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-    pil_frames = [Image.fromarray(m, mode='L').convert('P') for m in masks]
+    if use_color:
+        pil_frames = [Image.fromarray(m, mode='RGB') for m in masks]
+        pil_frames = [f.convert('P', palette=Image.ADAPTIVE, colors=256)
+                       for f in pil_frames]
+    else:
+        pil_frames = [Image.fromarray(m, mode='L').convert('P') for m in masks]
     duration_ms = int(1000 / args.fps)
     pil_frames[0].save(
         args.output,

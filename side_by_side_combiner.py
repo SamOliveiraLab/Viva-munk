@@ -34,7 +34,7 @@ def load_gif_frames(path):
     while True:
         try:
             im.seek(n)
-            frames.append(im.convert('L').copy())
+            frames.append(im.convert('RGB').copy())
             n += 1
         except EOFError:
             break
@@ -48,7 +48,7 @@ def letterbox(frame, target_size):
     new_w = max(1, int(round(sw * scale)))
     new_h = max(1, int(round(sh * scale)))
     resized = src.resize((new_w, new_h), Image.NEAREST)
-    canvas = Image.new('L', (target_size, target_size), 0)
+    canvas = Image.new('RGB', (target_size, target_size), (0, 0, 0))
     canvas.paste(resized, ((target_size - new_w) // 2,
                            (target_size - new_h) // 2))
     return canvas
@@ -74,8 +74,8 @@ def compose_frame(real_panel, sim_panel, frame_idx, iptg_frame,
     draw = ImageDraw.Draw(img)
 
     panel_y = HEADER_PX
-    img.paste(real_panel.convert('RGB'), (0, panel_y))
-    img.paste(sim_panel.convert('RGB'), (panel_size + PANEL_GAP_PX, panel_y))
+    img.paste(real_panel, (0, panel_y))
+    img.paste(sim_panel, (panel_size + PANEL_GAP_PX, panel_y))
 
     iptg_on = frame_idx >= iptg_frame
     t_min = (frame_idx * frame_interval) / 60.0

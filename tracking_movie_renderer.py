@@ -24,6 +24,7 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw
 
+from palette import color_for_id
 from partaker_to_vivamunk import parse_array
 from real_movie_renderer import crop_to_roi_bbox
 from sim_mask_renderer import draw_capsule
@@ -55,6 +56,7 @@ def load_cell_biographies(csv_path):
             if n == 0:
                 continue
             cells.append({
+                'cell_id': row.get('cell_id', ''),
                 'start_time': start_time,
                 'x': xs[:n], 'y': ys[:n],
                 'length': ls[:n], 'width': ws[:n],
@@ -63,9 +65,12 @@ def load_cell_biographies(csv_path):
     return cells
 
 
-def render_tracking_frame(cells, frame_idx, canvas_shape):
+def render_tracking_frame(cells, frame_idx, canvas_shape, color=True):
     H, W = canvas_shape
-    img = Image.new('L', (W, H), 0)
+    if color:
+        img = Image.new('RGB', (W, H), (0, 0, 0))
+    else:
+        img = Image.new('L', (W, H), 0)
     draw = ImageDraw.Draw(img)
     drawn = 0
     for c in cells:
@@ -80,25 +85,31 @@ def render_tracking_frame(cells, frame_idx, canvas_shape):
             continue
         radius = max(width / 2.0, 0.5)
         length = max(length, radius * 2.0)
-        draw_capsule(draw, cx, cy, length, radius, angle, fill=255)
+        fill = color_for_id(c['cell_id']) if color else 255
+        draw_capsule(draw, cx, cy, length, radius, angle, fill=fill)
         drawn += 1
-    return np.array(img, dtype=np.uint8), drawn
+    arr = np.array(img, dtype=np.uint8)
+    return arr, drawn
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Render Partaker tracking CSV as a binary mask GIF')
+        description='Render Partaker tracking CSV as a labeled-mask GIF')
     parser.add_argument('csv', nargs='?', default=DEFAULT_CSV)
     parser.add_argument('--roi_mask', default=DEFAULT_ROI,
                         help='Path to roi_mask.npy; pass "" to skip ROI crop')
     parser.add_argument('--frame_max', type=int, default=130)
     parser.add_argument('--output', default='out/tracking.gif')
     parser.add_argument('--fps', type=int, default=10)
+    parser.add_argument('--binary', action='store_true',
+                        help='Fall back to white-on-black binary (old behavior)')
     args = parser.parse_args()
 
+    use_color = not args.binary
     print(f"Loading tracking biographies from {args.csv}")
     cells = load_cell_biographies(args.csv)
-    print(f"  {len(cells)} cells loaded")
+    print(f"  {len(cells)} cells loaded  "
+          f"(mode={'colored by cell_id' if use_color else 'binary'})")
 
     roi = None
     if args.roi_mask:
@@ -113,9 +124,14 @@ def main():
 
     frames = []
     for t in range(args.frame_max + 1):
-        arr, n_drawn = render_tracking_frame(cells, t, canvas_shape)
+        arr, n_drawn = render_tracking_frame(
+            cells, t, canvas_shape, color=use_color)
         if roi is not None:
-            arr = np.where(roi > 0, arr, 0).astype(np.uint8)
+            if arr.ndim == 3:
+                mask3 = (roi > 0)[..., None]
+                arr = np.where(mask3, arr, 0).astype(np.uint8)
+            else:
+                arr = np.where(roi > 0, arr, 0).astype(np.uint8)
         frames.append(arr)
         if t % 10 == 0:
             print(f"  rendered frame {t}/{args.frame_max}  ({n_drawn} cells)")
@@ -124,7 +140,12 @@ def main():
         frames = crop_to_roi_bbox(frames, roi)
 
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-    pil_frames = [Image.fromarray(f, mode='L').convert('P') for f in frames]
+    if use_color:
+        pil_frames = [Image.fromarray(f, mode='RGB') for f in frames]
+        pil_frames = [f.convert('P', palette=Image.ADAPTIVE, colors=256)
+                       for f in pil_frames]
+    else:
+        pil_frames = [Image.fromarray(f, mode='L').convert('P') for f in frames]
     duration_ms = int(1000 / args.fps)
     pil_frames[0].save(
         args.output, save_all=True,
