@@ -66,7 +66,8 @@ def font(size):
 
 
 def compose_frame(real_panel, sim_panel, frame_idx, iptg_frame,
-                  frame_interval, panel_size):
+                  frame_interval, panel_size,
+                  label_left='real', label_right='sim'):
     width = panel_size * 2 + PANEL_GAP_PX
     height = HEADER_PX + panel_size + LABEL_PX
     img = Image.new('RGB', (width, height), (10, 10, 10))
@@ -93,10 +94,14 @@ def compose_frame(real_panel, sim_panel, frame_idx, iptg_frame,
 
     label_y = HEADER_PX + panel_size + 4
     f_label = font(18)
-    draw.text((panel_size // 2 - 18, label_y), "real",
+    bbox_l = draw.textbbox((0, 0), label_left, font=f_label)
+    bbox_r = draw.textbbox((0, 0), label_right, font=f_label)
+    wl = bbox_l[2] - bbox_l[0]
+    wr = bbox_r[2] - bbox_r[0]
+    draw.text((panel_size // 2 - wl // 2, label_y), label_left,
               fill=(220, 220, 220), font=f_label)
-    draw.text((panel_size + PANEL_GAP_PX + panel_size // 2 - 14, label_y),
-              "sim", fill=(220, 220, 220), font=f_label)
+    draw.text((panel_size + PANEL_GAP_PX + panel_size // 2 - wr // 2, label_y),
+              label_right, fill=(220, 220, 220), font=f_label)
 
     return img
 
@@ -112,6 +117,8 @@ def main():
     parser.add_argument('--iptg_frame', type=int, default=28)
     parser.add_argument('--frame_interval', type=float, default=300)
     parser.add_argument('--fps', type=int, default=10)
+    parser.add_argument('--label_left', default='real')
+    parser.add_argument('--label_right', default='sim')
     args = parser.parse_args()
 
     print(f"Loading {args.real} ...")
@@ -131,6 +138,7 @@ def main():
         frames.append(compose_frame(
             real_p, sim_p, i, args.iptg_frame,
             args.frame_interval, args.panel_size,
+            label_left=args.label_left, label_right=args.label_right,
         ))
         if i % 10 == 0:
             print(f"  composed frame {i}/{n-1}")
