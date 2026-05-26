@@ -30,7 +30,7 @@ import h5py
 import numpy as np
 from PIL import Image
 
-from palette import labels_to_rgb
+from palette import labels_to_rgb, compute_label_centroids, draw_id_labels
 
 
 DEFAULT_CACHE = (
@@ -45,11 +45,14 @@ ARRAY_KEY = 'mmap_arrays/omnipose_bact_phase/array'
 
 
 def load_mask_frames(h5_path, position, channel, frame_max, roi_mask=None,
-                      color=True):
+                      color=True, label_ids=True, font_size=10):
     """Return a list of frames.
 
     If color=True, each frame is (H, W, 3) uint8 with every cell painted
     using its omnipose instance label (per-frame, not persistent).
+    If label_ids=True (and color=True), the integer label is written on
+    each cell in white-on-black-outline text, matching Partaker's
+    'Labeled Segmentation' display mode.
     If color=False, each frame is (H, W) uint8, 255 wherever a cell sits.
     """
     with h5py.File(h5_path, 'r') as f:
@@ -64,6 +67,11 @@ def load_mask_frames(h5_path, position, channel, frame_max, roi_mask=None,
                 if roi_mask is not None:
                     rgb = np.where((roi_mask > 0)[..., None], rgb, 0
                                     ).astype(np.uint8)
+                if label_ids:
+                    centroids = compute_label_centroids(labels)
+                    pil = Image.fromarray(rgb, mode='RGB')
+                    draw_id_labels(pil, centroids, font_size=font_size)
+                    rgb = np.array(pil, dtype=np.uint8)
                 frames.append(rgb)
             else:
                 mask = (labels > 0).astype(np.uint8) * 255
@@ -106,9 +114,13 @@ def main():
                         help='Path to roi_mask.npy; pass "" to skip ROI cropping')
     parser.add_argument('--binary', action='store_true',
                         help='Fall back to white-on-black binary (old behavior)')
+    parser.add_argument('--no_ids', action='store_true',
+                        help='Skip the cell-id text labels on each cell')
+    parser.add_argument('--font_size', type=int, default=10)
     args = parser.parse_args()
 
     use_color = not args.binary
+    label_ids = use_color and not args.no_ids
     print(f"Reading masks from {args.h5}")
     print(f"  position={args.position}  channel={args.channel}  "
           f"frame_max={args.frame_max}  "
@@ -121,7 +133,8 @@ def main():
               f"keep_frac={float((roi>0).mean()):.3f}")
 
     masks = load_mask_frames(args.h5, args.position, args.channel,
-                             args.frame_max, roi_mask=roi, color=use_color)
+                             args.frame_max, roi_mask=roi, color=use_color,
+                             label_ids=label_ids, font_size=args.font_size)
     if roi is not None:
         masks = crop_to_roi_bbox(masks, roi)
     print(f"Loaded {len(masks)} mask frames; size {masks[0].shape}")

@@ -24,7 +24,7 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw
 
-from palette import color_for_id
+from palette import color_for_id, draw_id_labels
 from partaker_to_vivamunk import parse_array
 from real_movie_renderer import crop_to_roi_bbox
 from sim_mask_renderer import draw_capsule
@@ -65,7 +65,8 @@ def load_cell_biographies(csv_path):
     return cells
 
 
-def render_tracking_frame(cells, frame_idx, canvas_shape, color=True):
+def render_tracking_frame(cells, frame_idx, canvas_shape, color=True,
+                          label_ids=True, font_size=10):
     H, W = canvas_shape
     if color:
         img = Image.new('RGB', (W, H), (0, 0, 0))
@@ -73,6 +74,7 @@ def render_tracking_frame(cells, frame_idx, canvas_shape, color=True):
         img = Image.new('L', (W, H), 0)
     draw = ImageDraw.Draw(img)
     drawn = 0
+    centroids = {}
     for c in cells:
         k = frame_idx - c['start_time']
         if k < 0 or k >= len(c['x']):
@@ -87,7 +89,10 @@ def render_tracking_frame(cells, frame_idx, canvas_shape, color=True):
         length = max(length, radius * 2.0)
         fill = color_for_id(c['cell_id']) if color else 255
         draw_capsule(draw, cx, cy, length, radius, angle, fill=fill)
+        centroids[c['cell_id']] = (cx, cy)
         drawn += 1
+    if color and label_ids and centroids:
+        draw_id_labels(img, centroids, font_size=font_size)
     arr = np.array(img, dtype=np.uint8)
     return arr, drawn
 
@@ -103,9 +108,13 @@ def main():
     parser.add_argument('--fps', type=int, default=10)
     parser.add_argument('--binary', action='store_true',
                         help='Fall back to white-on-black binary (old behavior)')
+    parser.add_argument('--no_ids', action='store_true',
+                        help='Skip the cell-id text labels on each cell')
+    parser.add_argument('--font_size', type=int, default=10)
     args = parser.parse_args()
 
     use_color = not args.binary
+    label_ids = use_color and not args.no_ids
     print(f"Loading tracking biographies from {args.csv}")
     cells = load_cell_biographies(args.csv)
     print(f"  {len(cells)} cells loaded  "
@@ -125,7 +134,8 @@ def main():
     frames = []
     for t in range(args.frame_max + 1):
         arr, n_drawn = render_tracking_frame(
-            cells, t, canvas_shape, color=use_color)
+            cells, t, canvas_shape, color=use_color,
+            label_ids=label_ids, font_size=args.font_size)
         if roi is not None:
             if arr.ndim == 3:
                 mask3 = (roi > 0)[..., None]
