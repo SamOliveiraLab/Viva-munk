@@ -25,9 +25,16 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from palette import color_for_id, draw_id_labels
-from partaker_to_vivamunk import parse_array
 from real_movie_renderer import crop_to_roi_bbox
 from sim_mask_renderer import draw_capsule
+
+
+def parse_array(s):
+    """Parse a comma-separated string of floats. Inlined from
+    partaker_to_vivamunk to avoid pulling in process_bigraph here."""
+    if not s or s.strip() == '':
+        return []
+    return [float(x.strip()) for x in s.split(',')]
 
 
 DEFAULT_CSV = '/Volumes/SAM1/server_workspace_backup/cell_history_amby.csv'

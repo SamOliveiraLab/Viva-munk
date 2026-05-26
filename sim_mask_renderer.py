@@ -25,12 +25,14 @@ import time
 
 from PIL import Image, ImageDraw
 
-from process_bigraph import Composite, gather_emitter_results
-from multi_cell.experiments.runner import PYMUNK_CORE
-from partaker_to_vivamunk import make_document
-
 
 def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time):
+    # heavy imports kept local so `from sim_mask_renderer import draw_capsule`
+    # does not require process_bigraph at module-load time
+    from process_bigraph import Composite, gather_emitter_results
+    from multi_cell.experiments.runner import PYMUNK_CORE
+    from partaker_to_vivamunk import make_document
+
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
     )
