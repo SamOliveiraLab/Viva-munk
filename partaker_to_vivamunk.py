@@ -135,7 +135,9 @@ def build_agents(cells, env_size):
 
 def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
                   hydro=False, hydro_velocity_csv='', hydro_pressure_csv='',
-                  hydro_negate_vx=False, hydro_negate_vy=False):
+                  hydro_negate_vx=False, hydro_negate_vy=False,
+                  attach=False,
+                  chamber_length=None, chamber_width=None):
     """Returns (document_fn, env_size, growth_rate, n_cells)."""
 
     cells = load_partaker_cells(csv_path, pixel_size)
@@ -146,20 +148,35 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
 
     all_x = [c['x'] for c in cells]
     all_y = [c['y'] for c in cells]
-    env_size = max(max(all_x), max(all_y)) + 10.0
+
+    # Chamber geometry: use real dimensions if provided, else infer from data.
+    # PymunkProcess uses a square domain (env_size x env_size), so we take the
+    # larger dimension. remove_crossing sets the outlet boundary separately.
+    if chamber_length is not None or chamber_width is not None:
+        cl = chamber_length or (max(all_x) + 10.0)
+        cw = chamber_width or (max(all_y) + 10.0)
+        env_size = max(cl, cw)
+        print(f"Chamber geometry: {cl:.1f} x {cw:.1f} um (from args)")
+    else:
+        env_size = max(max(all_x), max(all_y)) + 10.0
+        print(f"Chamber geometry: inferred from cell coords")
     env_size = max(env_size, 30.0)
-    print(f"Environment size: {env_size:.1f} um")
+    print(f"Environment size: {env_size:.1f} um (square domain)")
 
     agents = build_agents(cells, env_size)
     print(f"Created {len(agents)} agents")
 
-    # Rate + mutate left at framework defaults. Threshold scaled to µm cell
-    # size — unit conversion so the framework operates at our scale.
-    rate = 0.000289
+    # Growth rate measured from real division times in the tracking CSV.
+    # Falls back to framework default (40-min doubling) if no divisions found.
+    rate, avg_dt, n_div = estimate_growth_rate(cells, frame_interval)
+    if n_div > 0:
+        print(f"Growth rate: {rate:.6f} /s measured from {n_div} real divisions "
+              f"(avg doubling {avg_dt:.0f} s = {avg_dt/60:.1f} min)")
+    else:
+        print(f"Growth rate: {rate:.6f} /s (framework default, no divisions in CSV)")
     sample = list(agents.values())[0]
     division_threshold = 0.02 * (2 * sample['radius']) * (sample['length'] * 2.0)
-    print(f"Growth params: rate={rate} /s (default ~40-min doubling), "
-          f"threshold={division_threshold:.4f} (scaled to µm cell size), mutate=False")
+    print(f"Division threshold: {division_threshold:.4f} (scaled to um cell size)")
 
     initial_state = {'cells': agents, 'particles': {}}
     add_grow_divide_to_agents(
@@ -167,6 +184,7 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
         agents_key='cells',
         config={
             'agents_key': 'cells',
+            'rate': rate,
             'threshold': division_threshold,
         },
     )
@@ -187,17 +205,33 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
               f"{flow_x:.1f}), shear ∂v/∂x = {hydro_shear_rate:.4g} 1/s, "
               f"low-Re Stokes-drag limit (mu_water ≈ 6.91e-4 Pa·s)")
 
+    if attach:
+        print(f"Attachment rule: ON  surface=bottom, threshold=0.5, "
+              f"distance={env_size:.1f} um (full monolayer, all cells start attached)")
+
     def document_fn(config=None):
+        multibody_config = {
+            'env_size': env_size,
+            'elasticity': 0.1,
+        }
+        if attach:
+            # Monolayer chip: all cells sit on the glass surface.
+            # adhesion_distance = env_size ensures every cell in the domain
+            # is considered "touching" the surface, matching the real chip
+            # where chamber height ~ cell diameter (all cells on glass).
+            multibody_config.update({
+                'adhesion_enabled': True,
+                'adhesion_surface': 'bottom',
+                'adhesion_threshold': 0.5,
+                'adhesion_distance': env_size,
+            })
         doc = {
             'cells':     initial_state['cells'],
             'particles': initial_state['particles'],
             'multibody': {
                 '_type': 'process',
                 'address': 'local:PymunkProcess',
-                'config': {
-                    'env_size': env_size,
-                    'elasticity': 0.1,
-                },
+                'config': multibody_config,
                 'interval': interval,
                 'inputs': {
                     'segment_cells': ['cells'],
@@ -259,6 +293,14 @@ def main():
                         help='Cap number of frame-0 cells loaded (smoke tests)')
     parser.add_argument('--hydro', action='store_true',
                         help='Enable hydrodynamics rule (Stokes-drag flow on cells)')
+    parser.add_argument('--attach', action='store_true',
+                        help='Enable surface attachment (cells pin to glass via adhesins)')
+    parser.add_argument('--chamber_length', type=float, default=None,
+                        help='Real chamber length in um (x-axis). Overrides auto-computed '
+                             'env_size. Get from COMSOL model or chip design.')
+    parser.add_argument('--chamber_width', type=float, default=None,
+                        help='Real chamber width in um (y-axis). Overrides auto-computed '
+                             'env_size. Get from COMSOL model or chip design.')
     parser.add_argument('--hydro_velocity_csv', default='',
                         help='COMSOL velocity CSV (cell_id,x,y,z,velocity_m_s). '
                              'If set together with --hydro_pressure_csv, real '
@@ -290,6 +332,9 @@ def main():
         hydro_pressure_csv=args.hydro_pressure_csv,
         hydro_negate_vx=args.hydro_negate_vx,
         hydro_negate_vy=args.hydro_negate_vy,
+        attach=args.attach,
+        chamber_length=args.chamber_length,
+        chamber_width=args.chamber_width,
     )
 
     entry = {
