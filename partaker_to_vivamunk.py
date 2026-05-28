@@ -23,6 +23,7 @@ from process_bigraph.emitter import emitter_from_wires
 from multi_cell.processes.grow_divide import add_grow_divide_to_agents
 from multi_cell.processes.remove_crossing import make_remove_crossing_process
 from multi_cell.processes.flow_drag import make_flow_drag_process
+from multi_cell.processes.pressure import make_pressure_process
 from multi_cell.experiments.runner import run_experiment
 
 
@@ -136,7 +137,7 @@ def build_agents(cells, env_size):
 def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
                   hydro=False, hydro_velocity_csv='', hydro_pressure_csv='',
                   hydro_negate_vx=False, hydro_negate_vy=False,
-                  attach=False,
+                  attach=False, pressure=False,
                   chamber_length=None, chamber_width=None):
     """Returns (document_fn, env_size, growth_rate, n_cells)."""
 
@@ -209,6 +210,10 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
         print(f"Attachment rule: ON  surface=bottom, threshold=0.5, "
               f"distance={env_size:.1f} um (full monolayer, all cells start attached)")
 
+    if pressure:
+        print(f"Pressure rule: ON  growth slows under crowding "
+              f"(rate *= exp(-pressure / pressure_k), pressure_k=5.0)")
+
     def document_fn(config=None):
         multibody_config = {
             'env_size': env_size,
@@ -272,6 +277,11 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
                     interval=interval,
                     agents_key='cells',
                 )
+        if pressure:
+            doc['pressure'] = make_pressure_process(
+                agents_key='cells',
+                env_size=env_size,
+            )
         return doc
 
     return document_fn, env_size, rate, n_cells
@@ -295,6 +305,8 @@ def main():
                         help='Enable hydrodynamics rule (Stokes-drag flow on cells)')
     parser.add_argument('--attach', action='store_true',
                         help='Enable surface attachment (cells pin to glass via adhesins)')
+    parser.add_argument('--pressure', action='store_true',
+                        help='Enable pressure-dependent growth inhibition (crowded cells slow down)')
     parser.add_argument('--chamber_length', type=float, default=None,
                         help='Real chamber length in um (x-axis). Overrides auto-computed '
                              'env_size. Get from COMSOL model or chip design.')
@@ -333,6 +345,7 @@ def main():
         hydro_negate_vx=args.hydro_negate_vx,
         hydro_negate_vy=args.hydro_negate_vy,
         attach=args.attach,
+        pressure=args.pressure,
         chamber_length=args.chamber_length,
         chamber_width=args.chamber_width,
     )

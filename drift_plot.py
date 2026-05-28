@@ -58,6 +58,7 @@ REAL_COLOR  = '#1f4e79'
 SIM_COLOR   = '#c4393a'
 HYDRO_COLOR = '#2ca02c'
 ATTACH_COLOR = '#e88a0c'
+PRESSURE_COLOR = '#8b5cf6'
 GUIDE_COLOR = '#888888'
 
 PRE_IPTG_LAST_FRAME = 27
@@ -159,12 +160,13 @@ def _capsule_area_um(length_um, radius_um):
 
 
 def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
-                           max_cells, sim_time, hydro=False, attach=False,
+                           max_cells, sim_time,
+                           hydro=False, attach=False, pressure=False,
                            hydro_velocity_csv='', hydro_pressure_csv='',
                            hydro_negate_vx=False, hydro_negate_vy=False):
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
-        hydro=hydro, attach=attach,
+        hydro=hydro, attach=attach, pressure=pressure,
         hydro_velocity_csv=hydro_velocity_csv,
         hydro_pressure_csv=hydro_pressure_csv,
         hydro_negate_vx=hydro_negate_vx,
@@ -181,13 +183,15 @@ def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
         label_parts.append('hydro')
     if attach:
         label_parts.append('attach')
+    if pressure:
+        label_parts.append('pressure')
     label = ' + '.join(label_parts)
     print(f"  sim ({label}): {len(results)} emit steps in {elapsed:.1f} s "
           f"(seed cells: {n_cells})")
     return results, env_size
 
 
-def load_or_run_sim(pickle_path, hydro, attach, args):
+def load_or_run_sim(pickle_path, hydro, attach, pressure, args):
     if pickle_path and os.path.exists(pickle_path):
         with open(pickle_path, 'rb') as f:
             payload = pickle.load(f)
@@ -196,7 +200,7 @@ def load_or_run_sim(pickle_path, hydro, attach, args):
     results, env_size = run_sim_for_trajectory(
         args.sim_csv, args.pixel_size, args.frame_interval,
         args.max_cells, args.sim_time,
-        hydro=hydro, attach=attach,
+        hydro=hydro, attach=attach, pressure=pressure,
         hydro_velocity_csv=args.hydro_velocity_csv if hydro else '',
         hydro_pressure_csv=args.hydro_pressure_csv if hydro else '',
         hydro_negate_vx=args.hydro_negate_vx if hydro else False,
@@ -208,7 +212,8 @@ def load_or_run_sim(pickle_path, hydro, attach, args):
             pickle.dump({'results': results, 'env_size': env_size,
                          'sim_time': args.sim_time,
                          'max_cells': args.max_cells,
-                         'hydro': hydro, 'attach': attach}, f)
+                         'hydro': hydro, 'attach': attach,
+                         'pressure': pressure}, f)
         print(f"  pickled: {pickle_path}")
     return results
 
@@ -275,9 +280,12 @@ def make_plot(t_real, n_real, a_real, mx_real, my_real,
               t_sim, n_sim, a_sim, mx_sim, my_sim,
               t_hyd, n_hyd, a_hyd, mx_hyd, my_hyd,
               t_att, n_att, a_att, mx_att, my_att,
+              t_prs, n_prs, a_prs, mx_prs, my_prs,
               out_path):
-    if n_real[0] == 0 or n_sim[0] == 0 or n_hyd[0] == 0 or n_att[0] == 0:
-        raise ValueError("First-timepoint count is zero; cannot normalize.")
+    for label, arr in [('real', n_real), ('default', n_sim),
+                       ('hydro', n_hyd), ('attach', n_att), ('pressure', n_prs)]:
+        if len(arr) == 0 or arr[0] == 0:
+            raise ValueError(f"First-timepoint count is zero for {label}; cannot normalize.")
 
     n_real_n = n_real / n_real[0]
     a_real_n = a_real / a_real[0]
@@ -287,17 +295,18 @@ def make_plot(t_real, n_real, a_real, mx_real, my_real,
     a_hyd_n  = a_hyd  / a_hyd[0]
     n_att_n  = n_att  / n_att[0]
     a_att_n  = a_att  / a_att[0]
+    n_prs_n  = n_prs  / n_prs[0]
+    a_prs_n  = a_prs  / a_prs[0]
 
     fig, (ax_n, ax_a, ax_pos) = plt.subplots(
         3, 1, figsize=(7.2, 10.5), sharex=True,
         gridspec_kw={'hspace': 0.22},
     )
 
-    # Panel A: cell count
-    for ax, real_n, sim_n, hyd_n, att_n, ylabel, title in (
-        (ax_n, n_real_n, n_sim_n, n_hyd_n, n_att_n,
+    for ax, real_n, sim_n, hyd_n, att_n, prs_n, ylabel, title in (
+        (ax_n, n_real_n, n_sim_n, n_hyd_n, n_att_n, n_prs_n,
          r'Cell count   $N(t)/N(0)$', 'Population growth'),
-        (ax_a, a_real_n, a_sim_n, a_hyd_n, a_att_n,
+        (ax_a, a_real_n, a_sim_n, a_hyd_n, a_att_n, a_prs_n,
          r'Total area   $A(t)/A(0)$', 'Biomass growth'),
     ):
         ax.plot(t_sim, sim_n, '-', color=SIM_COLOR, lw=2.0,
@@ -306,6 +315,8 @@ def make_plot(t_real, n_real, a_real, mx_real, my_real,
                 label='+ hydrodynamics')
         ax.plot(t_att, att_n, '-', color=ATTACH_COLOR, lw=2.0,
                 label='+ hydro + attachment')
+        ax.plot(t_prs, prs_n, '-', color=PRESSURE_COLOR, lw=2.0,
+                label='+ attach + pressure')
         ax.plot(t_real, real_n, 'o-', color=REAL_COLOR, lw=1.6, ms=4.5,
                 label='Real (Partaker)')
         ax.set_yscale('log')
@@ -316,13 +327,14 @@ def make_plot(t_real, n_real, a_real, mx_real, my_real,
         ax.axvline(PRE_IPTG_END_MIN, color=GUIDE_COLOR,
                    linestyle='--', linewidth=1.0)
 
-    # Panel C: mean position (absolute, not normalized)
     ax_pos.plot(t_sim, mx_sim, '-', color=SIM_COLOR, lw=1.5, alpha=0.8,
                 label='Sim x')
     ax_pos.plot(t_hyd, mx_hyd, '-', color=HYDRO_COLOR, lw=1.5, alpha=0.8,
                 label='+ hydro x')
     ax_pos.plot(t_att, mx_att, '-', color=ATTACH_COLOR, lw=1.5, alpha=0.8,
                 label='+ attach x')
+    ax_pos.plot(t_prs, mx_prs, '-', color=PRESSURE_COLOR, lw=1.5, alpha=0.8,
+                label='+ pressure x')
     ax_pos.plot(t_real, mx_real, 'o-', color=REAL_COLOR, lw=1.4, ms=3.5,
                 label='Real x')
     ax_pos.set_ylabel(r'Mean $x$ position ($\mu$m)')
@@ -331,33 +343,33 @@ def make_plot(t_real, n_real, a_real, mx_real, my_real,
     ax_pos.axvline(PRE_IPTG_END_MIN, color=GUIDE_COLOR,
                    linestyle='--', linewidth=1.0)
 
-    # IPTG annotation
     y_top = ax_n.get_ylim()[1]
     ax_n.text(PRE_IPTG_END_MIN - 1, y_top * 0.92,
               'IPTG / out of scope', rotation=90,
               ha='right', va='top', color=GUIDE_COLOR, fontsize=9)
 
-    ax_n.legend(loc='upper left', fontsize=9)
-    ax_pos.legend(loc='best', fontsize=8, ncol=2)
+    ax_n.legend(loc='upper left', fontsize=8)
+    ax_pos.legend(loc='best', fontsize=7, ncol=3)
     ax_pos.set_xlabel('Time (min)')
     ax_pos.set_xlim(0, PRE_IPTG_END_MIN + 2)
 
-    # GOF scores
     gof_def_n, _ = compute_gof(t_real, n_real, t_sim, n_sim)
     gof_hyd_n, _ = compute_gof(t_real, n_real, t_hyd, n_hyd)
     gof_att_n, _ = compute_gof(t_real, n_real, t_att, n_att)
+    gof_prs_n, _ = compute_gof(t_real, n_real, t_prs, n_prs)
     gof_def_a, _ = compute_gof(t_real, a_real, t_sim, a_sim)
     gof_hyd_a, _ = compute_gof(t_real, a_real, t_hyd, a_hyd)
     gof_att_a, _ = compute_gof(t_real, a_real, t_att, a_att)
+    gof_prs_a, _ = compute_gof(t_real, a_real, t_prs, a_prs)
 
     gof_text = (
         f'GOF (RMSE, lower=better)\n'
         f'Count:  default={gof_def_n:.3f}  hydro={gof_hyd_n:.3f}  '
-        f'attach={gof_att_n:.3f}\n'
+        f'attach={gof_att_n:.3f}  pressure={gof_prs_n:.3f}\n'
         f'Area:   default={gof_def_a:.3f}  hydro={gof_hyd_a:.3f}  '
-        f'attach={gof_att_a:.3f}'
+        f'attach={gof_att_a:.3f}  pressure={gof_prs_a:.3f}'
     )
-    fig.text(0.12, 0.01, gof_text, fontsize=8, family='monospace',
+    fig.text(0.12, 0.01, gof_text, fontsize=7, family='monospace',
              va='bottom', color=GUIDE_COLOR)
 
     fig.suptitle(
@@ -372,15 +384,15 @@ def make_plot(t_real, n_real, a_real, mx_real, my_real,
     print(f"  wrote: {out_path}")
     print(f"  wrote: {os.path.splitext(out_path)[0] + '.pdf'}")
 
-    # Print GOF to terminal
     print(f"\n  GOF scores (RMSE of normalized curves):")
     print(f"    Cell count:  default={gof_def_n:.4f}  hydro={gof_hyd_n:.4f}  "
-          f"attach={gof_att_n:.4f}")
+          f"attach={gof_att_n:.4f}  pressure={gof_prs_n:.4f}")
     print(f"    Total area:  default={gof_def_a:.4f}  hydro={gof_hyd_a:.4f}  "
-          f"attach={gof_att_a:.4f}")
-    combined = (gof_def_n + gof_def_a, gof_hyd_n + gof_hyd_a, gof_att_n + gof_att_a)
+          f"attach={gof_att_a:.4f}  pressure={gof_prs_a:.4f}")
+    combined = (gof_def_n + gof_def_a, gof_hyd_n + gof_hyd_a,
+                gof_att_n + gof_att_a, gof_prs_n + gof_prs_a)
     print(f"    Combined:    default={combined[0]:.4f}  hydro={combined[1]:.4f}  "
-          f"attach={combined[2]:.4f}")
+          f"attach={combined[2]:.4f}  pressure={combined[3]:.4f}")
 
 
 # ── main ─────────────────────────────────────────────────────────────
@@ -402,6 +414,8 @@ def main():
                    help='Cache for defaults + hydrodynamics sim.')
     p.add_argument('--sim_pickle_attach', default='out/sim_attach.pkl',
                    help='Cache for hydro + attachment sim.')
+    p.add_argument('--sim_pickle_pressure', default='out/sim_pressure.pkl',
+                   help='Cache for hydro + attachment + pressure sim.')
     p.add_argument('--hydro_velocity_csv', default='',
                    help='COMSOL velocity CSV; if set, hydro sim uses real chamber flow.')
     p.add_argument('--hydro_pressure_csv', default='',
@@ -422,31 +436,39 @@ def main():
           f"area {a_real[0]:.1f} -> {a_real[-1]:.1f} um^2")
 
     print('Sim (framework defaults):')
-    results_def = load_or_run_sim(args.sim_pickle, hydro=False, attach=False, args=args)
+    results_def = load_or_run_sim(args.sim_pickle, hydro=False, attach=False, pressure=False, args=args)
     t_sim, n_sim, a_sim, mx_sim, my_sim = sim_trajectory(results_def, max_time_s=args.sim_time)
     print(f"  steps:  {len(t_sim)}   "
           f"count {int(n_sim[0])} -> {int(n_sim[-1])}   "
           f"area {a_sim[0]:.1f} -> {a_sim[-1]:.1f} um^2")
 
     print('Sim (defaults + hydrodynamics):')
-    results_hyd = load_or_run_sim(args.sim_pickle_hydro, hydro=True, attach=False, args=args)
+    results_hyd = load_or_run_sim(args.sim_pickle_hydro, hydro=True, attach=False, pressure=False, args=args)
     t_hyd, n_hyd, a_hyd, mx_hyd, my_hyd = sim_trajectory(results_hyd, max_time_s=args.sim_time)
     print(f"  steps:  {len(t_hyd)}   "
           f"count {int(n_hyd[0])} -> {int(n_hyd[-1])}   "
           f"area {a_hyd[0]:.1f} -> {a_hyd[-1]:.1f} um^2")
 
     print('Sim (hydro + attachment):')
-    results_att = load_or_run_sim(args.sim_pickle_attach, hydro=True, attach=True, args=args)
+    results_att = load_or_run_sim(args.sim_pickle_attach, hydro=True, attach=True, pressure=False, args=args)
     t_att, n_att, a_att, mx_att, my_att = sim_trajectory(results_att, max_time_s=args.sim_time)
     print(f"  steps:  {len(t_att)}   "
           f"count {int(n_att[0])} -> {int(n_att[-1])}   "
           f"area {a_att[0]:.1f} -> {a_att[-1]:.1f} um^2")
+
+    print('Sim (hydro + attachment + pressure):')
+    results_prs = load_or_run_sim(args.sim_pickle_pressure, hydro=True, attach=True, pressure=True, args=args)
+    t_prs, n_prs, a_prs, mx_prs, my_prs = sim_trajectory(results_prs, max_time_s=args.sim_time)
+    print(f"  steps:  {len(t_prs)}   "
+          f"count {int(n_prs[0])} -> {int(n_prs[-1])}   "
+          f"area {a_prs[0]:.1f} -> {a_prs[-1]:.1f} um^2")
 
     print('Plotting:')
     make_plot(t_real, n_real, a_real, mx_real, my_real,
               t_sim, n_sim, a_sim, mx_sim, my_sim,
               t_hyd, n_hyd, a_hyd, mx_hyd, my_hyd,
               t_att, n_att, a_att, mx_att, my_att,
+              t_prs, n_prs, a_prs, mx_prs, my_prs,
               args.out)
 
 
