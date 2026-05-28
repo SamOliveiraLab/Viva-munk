@@ -29,7 +29,10 @@ from PIL import Image, ImageDraw
 from palette import color_for_id, draw_id_labels
 
 
-def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time):
+def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time,
+            hydro=False, attach=False, pressure=False,
+            hydro_velocity_csv='', hydro_pressure_csv='',
+            hydro_negate_vx=False, hydro_negate_vy=False):
     # heavy imports kept local so `from sim_mask_renderer import draw_capsule`
     # does not require process_bigraph at module-load time
     from process_bigraph import Composite, gather_emitter_results
@@ -38,6 +41,11 @@ def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time):
 
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
+        hydro=hydro, attach=attach, pressure=pressure,
+        hydro_velocity_csv=hydro_velocity_csv,
+        hydro_pressure_csv=hydro_pressure_csv,
+        hydro_negate_vx=hydro_negate_vx,
+        hydro_negate_vy=hydro_negate_vy,
     )
     print(f"Built document with {n_cells} cells, env {env_size:.1f} um")
     document = doc_fn({'env_size': env_size})
@@ -141,6 +149,12 @@ def main():
     parser.add_argument('--no_ids', action='store_true',
                         help='Skip cell-id text labels')
     parser.add_argument('--font_size', type=int, default=10)
+    parser.add_argument('--hydro', action='store_true',
+                        help='Enable hydrodynamics rule')
+    parser.add_argument('--attach', action='store_true',
+                        help='Enable surface attachment rule')
+    parser.add_argument('--pressure', action='store_true',
+                        help='Enable pressure-dependent growth inhibition rule')
     args = parser.parse_args()
 
     use_color = not args.binary
@@ -156,6 +170,7 @@ def main():
         results, env_size = run_sim(
             args.csv, args.pixel_size, args.frame_interval,
             args.max_cells, args.sim_time,
+            hydro=args.hydro, attach=args.attach, pressure=args.pressure,
         )
         os.makedirs(os.path.dirname(args.pickle) or '.', exist_ok=True)
         with open(args.pickle, 'wb') as f:
