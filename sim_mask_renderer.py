@@ -23,7 +23,10 @@ import os
 import pickle
 import time
 
+import numpy as np
 from PIL import Image, ImageDraw
+
+from palette import color_for_id, draw_id_labels
 
 
 def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time):
@@ -82,12 +85,17 @@ def draw_capsule(draw, cx_px, cy_px, length_px, radius_px, angle_rad,
                   e2x + radius_px, e2y + radius_px], fill=fill)
 
 
-def render_frame(state, env_size_um, pixel_size_um):
+def render_frame(state, env_size_um, pixel_size_um, color=True,
+                 label_ids=True, font_size=10):
     canvas_px = int(round(env_size_um / pixel_size_um))
-    img = Image.new('L', (canvas_px, canvas_px), 0)
+    if color:
+        img = Image.new('RGB', (canvas_px, canvas_px), (0, 0, 0))
+    else:
+        img = Image.new('L', (canvas_px, canvas_px), 0)
     draw = ImageDraw.Draw(img)
     agents = state.get('agents', {}) or state.get('cells', {})
-    for cell in agents.values():
+    centroids = {}
+    for cid, cell in agents.items():
         loc = cell.get('location') or (0.0, 0.0)
         cx_um, cy_um = float(loc[0]), float(loc[1])
         length_um = float(cell.get('length', 1.0))
@@ -98,12 +106,17 @@ def render_frame(state, env_size_um, pixel_size_um):
             continue
         cx_px = cx_um / pixel_size_um
         cy_px = cy_um / pixel_size_um
+        fill = color_for_id(cid) if color else 255
         draw_capsule(
             draw, cx_px, cy_px,
             length_um / pixel_size_um,
             radius_um / pixel_size_um,
             angle_rad,
+            fill=fill,
         )
+        centroids[cid] = (cx_px, cy_px)
+    if color and label_ids and centroids:
+        draw_id_labels(img, centroids, font_size=font_size)
     return img
 
 
@@ -123,7 +136,15 @@ def main():
     parser.add_argument('--pickle', default='out/sim_results.pkl')
     parser.add_argument('--fps', type=int, default=10)
     parser.add_argument('--reuse_pickle', action='store_true')
+    parser.add_argument('--binary', action='store_true',
+                        help='White-on-black instead of colored labels')
+    parser.add_argument('--no_ids', action='store_true',
+                        help='Skip cell-id text labels')
+    parser.add_argument('--font_size', type=int, default=10)
     args = parser.parse_args()
+
+    use_color = not args.binary
+    label_ids = use_color and not args.no_ids
 
     if args.reuse_pickle and os.path.exists(args.pickle):
         print(f"Loading cached results from {args.pickle}")
@@ -148,8 +169,13 @@ def main():
 
     pil_frames = []
     for i, state in enumerate(picks):
-        img = render_frame(state, env_size, args.pixel_size_render)
-        pil_frames.append(img.convert('P'))
+        img = render_frame(state, env_size, args.pixel_size_render,
+                           color=use_color, label_ids=label_ids,
+                           font_size=args.font_size)
+        if use_color:
+            pil_frames.append(img.convert('P', palette=Image.ADAPTIVE, colors=256))
+        else:
+            pil_frames.append(img.convert('P'))
         if i % 10 == 0:
             print(f"  rendered frame {i}/{len(picks)-1}")
 
