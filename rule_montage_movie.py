@@ -40,7 +40,10 @@ def sim_frames(args, flags, pickle_path):
     else:
         results, env_size = run_sim(
             args.sim_csv, args.pixel_size, args.frame_interval,
-            args.max_cells, args.sim_time, **flags,
+            args.max_cells, args.sim_time,
+            chamber_length=args.chamber_length,
+            chamber_width=args.chamber_width,
+            **flags,
         )
         os.makedirs(os.path.dirname(pickle_path) or '.', exist_ok=True)
         with open(pickle_path, 'wb') as f:
@@ -105,6 +108,10 @@ def main():
     p.add_argument('--frame_interval', type=float, default=300)
     p.add_argument('--sim_time', type=float, default=8100)
     p.add_argument('--max_cells', type=int, default=250)
+    p.add_argument('--chamber_length', type=float, default=None,
+                   help='Real chamber length in um (x). 70 for this chip.')
+    p.add_argument('--chamber_width', type=float, default=None,
+                   help='Real chamber width in um (y). 52.5 for this chip.')
     p.add_argument('--font_size', type=int, default=9)
     p.add_argument('--no_ids', action='store_true')
     p.add_argument('--fps', type=int, default=6)

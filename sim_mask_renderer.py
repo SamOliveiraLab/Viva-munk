@@ -32,7 +32,8 @@ from palette import color_for_id, draw_id_labels
 def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time,
             hydro=False, attach=False, pressure=False,
             hydro_velocity_csv='', hydro_pressure_csv='',
-            hydro_negate_vx=False, hydro_negate_vy=False):
+            hydro_negate_vx=False, hydro_negate_vy=False,
+            chamber_length=None, chamber_width=None):
     # heavy imports kept local so `from sim_mask_renderer import draw_capsule`
     # does not require process_bigraph at module-load time
     from process_bigraph import Composite, gather_emitter_results
@@ -46,6 +47,7 @@ def run_sim(csv_path, pixel_size, frame_interval, max_cells, sim_time,
         hydro_pressure_csv=hydro_pressure_csv,
         hydro_negate_vx=hydro_negate_vx,
         hydro_negate_vy=hydro_negate_vy,
+        chamber_length=chamber_length, chamber_width=chamber_width,
     )
     print(f"Built document with {n_cells} cells, env {env_size:.1f} um")
     document = doc_fn({'env_size': env_size})
@@ -155,6 +157,10 @@ def main():
                         help='Enable surface attachment rule')
     parser.add_argument('--pressure', action='store_true',
                         help='Enable pressure-dependent growth inhibition rule')
+    parser.add_argument('--chamber_length', type=float, default=None,
+                        help='Real chamber length in um (x). 70 for this chip.')
+    parser.add_argument('--chamber_width', type=float, default=None,
+                        help='Real chamber width in um (y). 52.5 for this chip.')
     args = parser.parse_args()
 
     use_color = not args.binary
@@ -171,6 +177,7 @@ def main():
             args.csv, args.pixel_size, args.frame_interval,
             args.max_cells, args.sim_time,
             hydro=args.hydro, attach=args.attach, pressure=args.pressure,
+            chamber_length=args.chamber_length, chamber_width=args.chamber_width,
         )
         os.makedirs(os.path.dirname(args.pickle) or '.', exist_ok=True)
         with open(args.pickle, 'wb') as f:

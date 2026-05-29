@@ -163,7 +163,8 @@ def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
                            max_cells, sim_time,
                            hydro=False, attach=False, pressure=False,
                            hydro_velocity_csv='', hydro_pressure_csv='',
-                           hydro_negate_vx=False, hydro_negate_vy=False):
+                           hydro_negate_vx=False, hydro_negate_vy=False,
+                           chamber_length=None, chamber_width=None):
     doc_fn, env_size, _rate, n_cells = make_document(
         csv_path, pixel_size, frame_interval, max_cells=max_cells,
         hydro=hydro, attach=attach, pressure=pressure,
@@ -171,6 +172,7 @@ def run_sim_for_trajectory(csv_path, pixel_size, frame_interval,
         hydro_pressure_csv=hydro_pressure_csv,
         hydro_negate_vx=hydro_negate_vx,
         hydro_negate_vy=hydro_negate_vy,
+        chamber_length=chamber_length, chamber_width=chamber_width,
     )
     document = doc_fn({'env_size': env_size})
     sim = Composite({'state': document}, core=PYMUNK_CORE)
@@ -205,6 +207,7 @@ def load_or_run_sim(pickle_path, hydro, attach, pressure, args):
         hydro_pressure_csv=args.hydro_pressure_csv if hydro else '',
         hydro_negate_vx=args.hydro_negate_vx if hydro else False,
         hydro_negate_vy=args.hydro_negate_vy if hydro else False,
+        chamber_length=args.chamber_length, chamber_width=args.chamber_width,
     )
     if pickle_path:
         os.makedirs(os.path.dirname(pickle_path) or '.', exist_ok=True)
@@ -424,6 +427,10 @@ def main():
                    help='Flip x-component of COMSOL flow direction.')
     p.add_argument('--hydro_negate_vy', action='store_true',
                    help='Flip y-component of COMSOL flow direction.')
+    p.add_argument('--chamber_length', type=float, default=None,
+                   help='Real chamber length in um (x). Default 70 for this chip.')
+    p.add_argument('--chamber_width', type=float, default=None,
+                   help='Real chamber width in um (y). Default 52.5 for this chip.')
     args = p.parse_args()
 
     print('Real data:')
