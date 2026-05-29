@@ -80,7 +80,8 @@ def render_sim_panel(args, flags, pickle_path, font_size):
     state = picks[min(args.frame, len(picks) - 1)]
     img = render_frame(state, env_size, args.pixel_size_render,
                        color=True, label_ids=not args.no_ids,
-                       font_size=font_size)
+                       font_size=font_size,
+                       env_height_um=args.chamber_width)
     return img.convert('RGB')
 
 

@@ -31,7 +31,8 @@ def render_movie(results, env_size, args, out_path):
     for i, state in enumerate(picks):
         img = render_frame(state, env_size, args.pixel_size_render,
                            color=True, label_ids=not args.no_ids,
-                           font_size=args.font_size)
+                           font_size=args.font_size,
+                           env_height_um=args.chamber_width)
         frames.append(img.convert('P', palette=Image.ADAPTIVE, colors=256))
         if i % 10 == 0:
             print(f"    frame {i}/{len(picks)-1}")
@@ -51,6 +52,9 @@ def main():
     p.add_argument('--pixel_size_render', type=float, default=0.0645)
     p.add_argument('--font_size', type=int, default=9)
     p.add_argument('--no_ids', action='store_true')
+    p.add_argument('--chamber_width', type=float, default=None,
+                   help='Real chamber width in um (y) for rectangular canvas. '
+                        '52.5 for this chip. Omit for square.')
     p.add_argument('--fps', type=int, default=6)
     args = p.parse_args()
 

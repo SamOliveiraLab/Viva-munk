@@ -55,7 +55,8 @@ def sim_frames(args, flags, pickle_path):
     for state in picks:
         img = render_frame(state, env_size, args.pixel_size_render,
                            color=True, label_ids=not args.no_ids,
-                           font_size=args.font_size)
+                           font_size=args.font_size,
+                           env_height_um=args.chamber_width)
         frames.append(img.convert('RGB'))
     return frames
 

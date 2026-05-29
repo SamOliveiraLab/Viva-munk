@@ -96,12 +96,19 @@ def draw_capsule(draw, cx_px, cy_px, length_px, radius_px, angle_rad,
 
 
 def render_frame(state, env_size_um, pixel_size_um, color=True,
-                 label_ids=True, font_size=10):
-    canvas_px = int(round(env_size_um / pixel_size_um))
-    if color:
-        img = Image.new('RGB', (canvas_px, canvas_px), (0, 0, 0))
+                 label_ids=True, font_size=10, env_height_um=None):
+    # Rectangular canvas: width = env_size_um, height = env_height_um.
+    # Falls back to a square (height = width) when env_height_um is unset,
+    # preserving old behavior for square domains.
+    width_px = int(round(env_size_um / pixel_size_um))
+    if env_height_um and env_height_um > 0:
+        height_px = int(round(env_height_um / pixel_size_um))
     else:
-        img = Image.new('L', (canvas_px, canvas_px), 0)
+        height_px = width_px
+    if color:
+        img = Image.new('RGB', (width_px, height_px), (0, 0, 0))
+    else:
+        img = Image.new('L', (width_px, height_px), 0)
     draw = ImageDraw.Draw(img)
     agents = state.get('agents', {}) or state.get('cells', {})
     centroids = {}
@@ -193,7 +200,8 @@ def main():
     for i, state in enumerate(picks):
         img = render_frame(state, env_size, args.pixel_size_render,
                            color=use_color, label_ids=label_ids,
-                           font_size=args.font_size)
+                           font_size=args.font_size,
+                           env_height_um=args.chamber_width)
         if use_color:
             pil_frames.append(img.convert('P', palette=Image.ADAPTIVE, colors=256))
         else:
