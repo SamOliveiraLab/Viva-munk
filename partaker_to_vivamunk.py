@@ -151,18 +151,23 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
     all_y = [c['y'] for c in cells]
 
     # Chamber geometry: use real dimensions if provided, else infer from data.
-    # PymunkProcess uses a square domain (env_size x env_size), so we take the
-    # larger dimension. remove_crossing sets the outlet boundary separately.
+    # PymunkProcess supports a rectangle via env_height (env_size = x/width,
+    # env_height = y/height). remove_crossing sets the outlet boundary on x.
     if chamber_length is not None or chamber_width is not None:
-        cl = chamber_length or (max(all_x) + 10.0)
-        cw = chamber_width or (max(all_y) + 10.0)
-        env_size = max(cl, cw)
-        print(f"Chamber geometry: {cl:.1f} x {cw:.1f} um (from args)")
+        env_size   = float(chamber_length or (max(all_x) + 10.0))  # x extent
+        env_height = float(chamber_width  or (max(all_y) + 10.0))  # y extent
+        print(f"Chamber geometry: {env_size:.1f} x {env_height:.1f} um "
+              f"(real, from args)")
     else:
-        env_size = max(max(all_x), max(all_y)) + 10.0
-        print(f"Chamber geometry: inferred from cell coords")
-    env_size = max(env_size, 30.0)
-    print(f"Environment size: {env_size:.1f} um (square domain)")
+        env_size = env_height = max(max(all_x), max(all_y)) + 10.0
+        print(f"Chamber geometry: inferred from cell coords (square)")
+    env_size   = max(env_size, 30.0)
+    env_height = max(env_height, 30.0)
+    if abs(env_size - env_height) < 1e-6:
+        print(f"Environment size: {env_size:.1f} um (square domain)")
+    else:
+        print(f"Environment size: {env_size:.1f} x {env_height:.1f} um "
+              f"(rectangular domain)")
 
     agents = build_agents(cells, env_size)
     print(f"Created {len(agents)} agents")
@@ -217,6 +222,7 @@ def make_document(csv_path, pixel_size, frame_interval, max_cells=None,
     def document_fn(config=None):
         multibody_config = {
             'env_size': env_size,
+            'env_height': env_height,
             'elasticity': 0.1,
         }
         if attach:
